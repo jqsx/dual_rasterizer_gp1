@@ -1,13 +1,15 @@
-#ifndef DAE_SCENE_DX11
-#define DAE_SCENE_DX11
+#pragma once
 
 #include <vector>
+
+#include "Mesh.h"
+#include "Effect.h"
 
 class ID3D11Device;
 
 namespace dae {
-	class Mesh;
-	class Effect;
+	//class Mesh;
+	//class Effect;
 
 	struct Container {
 		Mesh* mesh;
@@ -32,5 +34,3 @@ namespace dae {
 		const std::vector<Container>& GetContainers() const { return m_Containers; };
 	};
 }
-
-#endif

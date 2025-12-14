@@ -1,5 +1,4 @@
-#ifndef DAE_MESH_DX11
-#define DAE_MESH_DX11
+#pragma once
 
 #include "ColorRGB.h"
 #include "Vector3.h"
@@ -20,12 +19,10 @@ namespace dae {
 
 		uint32_t m_NumIndices;
 	public:
-		Mesh(ID3D11Device* pDevice, std::vector<Vertex> vertices, std::vector<unsigned int> indices);
+		explicit Mesh(ID3D11Device* pDevice, const std::vector<Vertex>& vertices, const std::vector<unsigned int>& indices);
 		~Mesh();
 
 		ID3D11Buffer* GetVertexBuffer() const { return m_pVertexBuffer; }
 		ID3D11Buffer* GetIndexBuffer() const { return m_pIndexBuffer; }
 	};
 }
-
-#endif

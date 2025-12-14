@@ -4,9 +4,7 @@
 
 #include "Mesh.h"
 
-using namespace dae;
-
-dae::Mesh::Mesh(ID3D11Device* pDevice, std::vector<Vertex> vertices, std::vector<unsigned int> indices)
+dae::Mesh::Mesh(ID3D11Device* pDevice, const std::vector<Vertex>& vertices, const std::vector<unsigned int>& indices) : m_NumIndices{0}, m_pIndexBuffer{nullptr}, m_pVertexBuffer{nullptr}
 {
 	D3D11_BUFFER_DESC bd = {};
 	bd.Usage = D3D11_USAGE_IMMUTABLE;

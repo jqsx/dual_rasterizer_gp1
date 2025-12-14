@@ -1,10 +1,7 @@
-#include "Mesh.h"
-#include "Effect.h"
-
-#include <string>
-#include <vector>
-
 #include "Scene.h"
+
+//#include "Mesh.h"
+//#include "Effect.h"
 
 void dae::Scene::AddEffect(Effect* effect)
 {
@@ -41,17 +38,17 @@ dae::Scene::~Scene()
 
 void dae::Scene::InitializeScene(ID3D11Device* pDevice)
 {
-	std::vector<Vertex> vertices{
+	std::vector<dae::Vertex> vertices{
 		{ { 0.f, 0.5f, 0.5f }, { 1.0f, 0.0f, 0.0f } },
 		{ { 0.5f, -0.5f, 0.5f }, { 0.0f, 0.0f, 1.0f } },
 		{ { -0.5f, -0.5f, 0.5f }, { 0.0f, 1.0f, 0.0f } }
 	};
 	std::vector<uint32_t> indices{ 0, 1, 2 };
-	Mesh* helloTriangle = new Mesh(pDevice, vertices, indices);
+	Mesh* helloTriangle = new dae::Mesh(pDevice, vertices, indices);
 
 	AddMesh(helloTriangle);
 
-	Effect* posColEffect = new Effect(pDevice, L"./resources/PosCol3D.fx");
+	Effect* posColEffect = new dae::Effect(pDevice, L"./resources/PosCol3D.fx");
 
 	AddEffect(posColEffect);
 

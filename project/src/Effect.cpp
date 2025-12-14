@@ -6,8 +6,6 @@
 
 #include "Effect.h"
 
-using namespace dae;
-
 ID3DX11Effect* dae::Effect::LoadEffect(ID3D11Device* pDevice, const std::wstring assetFile) {
 	HRESULT result;
 	ID3D10Blob* pErrorBlob{ nullptr };
@@ -17,7 +15,7 @@ ID3DX11Effect* dae::Effect::LoadEffect(ID3D11Device* pDevice, const std::wstring
 #if defined(DEBUG) || defined(_DEBUG)
 	shaderFlags |= D3DCOMPILE_DEBUG;
 	shaderFlags |= D3DCOMPILE_SKIP_OPTIMIZATION;
-#endif 
+#endif
 
 	result = D3DX11CompileEffectFromFile(assetFile.c_str(), nullptr, nullptr, shaderFlags, 0, pDevice, &pEffect, &pErrorBlob);
 	if (FAILED(result)) {
@@ -40,7 +38,7 @@ ID3DX11Effect* dae::Effect::LoadEffect(ID3D11Device* pDevice, const std::wstring
 	return pEffect;
 }
 
-dae::Effect::Effect(ID3D11Device* pDevice, const std::wstring assetFile)
+dae::Effect::Effect(ID3D11Device* pDevice, const std::wstring assetFile) : m_pEffect { nullptr }, m_pInputLayout {nullptr}, m_pTechnique { nullptr }
 {
 	m_pEffect = LoadEffect(pDevice, assetFile); // Logs errors
 	if (m_pEffect != nullptr) { // Avoids accessing nullptr

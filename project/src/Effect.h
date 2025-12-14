@@ -1,5 +1,4 @@
-#ifndef DAE_EFFECT_DX11
-#define DAE_EFFECT_DX11
+#pragma once
 
 class ID3DX11Effect;
 class ID3DX11EffectTechnique;
@@ -17,11 +16,10 @@ namespace dae {
 		static ID3DX11Effect* LoadEffect(ID3D11Device* pDevice, const std::wstring assetFile);
 
 	public:
-		Effect(ID3D11Device* pDevice, const std::wstring assetFile);
+		explicit Effect(ID3D11Device* pDevice, const std::wstring assetFile);
 		~Effect();
 
 		ID3D11InputLayout* GetInputLayout() const { return m_pInputLayout; }
 		ID3DX11EffectTechnique* GetTechnique() const { return m_pTechnique; }
 	};
 }
-#endif
