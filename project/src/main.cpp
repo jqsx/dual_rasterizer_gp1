@@ -1,0 +1,107 @@
+//External includes
+#include "SDL.h"
+#include "SDL_surface.h"
+#include "SDL_image.h"
+#include "SDL_syswm.h"
+#undef main
+
+//Standard includes
+#include <iostream>
+
+//Project includes
+#include "Timer.h"
+#include "Renderer.h"
+#if defined(_DEBUG)
+	#include "LeakDetector.h"
+#endif
+
+using namespace dae;
+
+void ShutDown(SDL_Window* pWindow)
+{
+	SDL_DestroyWindow(pWindow);
+	SDL_Quit();
+}
+
+int main(int argc, char* args[])
+{
+	//Unreferenced parameters
+	(void)argc;
+	(void)args;
+
+	// Leak detection
+	#if defined(_DEBUG)
+		LeakDetector detector{};
+		std::cout << "Leak detector initialized." << std::endl;
+	#endif
+
+	//Create window + surfaces
+	SDL_Init(SDL_INIT_VIDEO);
+
+	const uint32_t width = 640;
+	const uint32_t height = 480;
+
+	SDL_Window* pWindow = SDL_CreateWindow(
+		"DirectX - ***Insert Name/Class***",
+		SDL_WINDOWPOS_UNDEFINED,
+		SDL_WINDOWPOS_UNDEFINED,
+		width, height, 0);
+
+	if (!pWindow)
+		return 1;
+
+	//Initialize "framework"
+	const auto pTimer = new Timer();
+	const auto pRenderer = new Renderer(pWindow);
+
+	//Start loop
+	pTimer->Start();
+	float printTimer = 0.f;
+	bool isLooping = true;
+	while (isLooping)
+	{
+		//--------- Get input events ---------
+		SDL_Event e;
+		while (SDL_PollEvent(&e))
+		{
+			switch (e.type)
+			{
+			case SDL_QUIT:
+				isLooping = false;
+				break;
+			case SDL_KEYUP:
+				//Test for a key
+				//if (e.key.keysym.scancode == SDL_SCANCODE_X)
+				break;
+			default: ;
+			}
+		}
+
+		//--------- Update ---------
+		pRenderer->Update(pTimer);
+
+		//--------- Render ---------
+		pRenderer->Render();
+
+		//--------- Timer ---------
+		pTimer->Update();
+		printTimer += pTimer->GetElapsed();
+		if (printTimer >= 1.f)
+		{
+			printTimer = 0.f;
+			std::cout << "dFPS: " << pTimer->GetdFPS() << std::endl;
+		}
+	}
+	pTimer->Stop();
+
+	//Shutdown "framework"
+	delete pRenderer;
+	delete pTimer;
+
+	ShutDown(pWindow);
+
+#ifdef _DEBUG
+	detector.CheckForLeaks();
+#endif 
+	return 0;
+}
