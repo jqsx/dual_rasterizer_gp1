@@ -1,7 +1,7 @@
 #include "Scene.h"
 
-//#include "Mesh.h"
-//#include "Effect.h"
+#include "Mesh.h"
+#include "Effect.h"
 
 void dae::Scene::AddEffect(Effect* effect)
 {

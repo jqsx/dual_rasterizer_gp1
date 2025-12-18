@@ -54,6 +54,8 @@ int main(int argc, char* args[])
 	const auto pTimer = new Timer();
 	const auto pRenderer = new Renderer(pWindow);
 
+	// Can create the scene and objects after DirectX init
+
 	//Start loop
 	pTimer->Start();
 	float printTimer = 0.f;

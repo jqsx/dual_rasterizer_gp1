@@ -19,6 +19,7 @@ namespace dae
 {
 	class Mesh;
 	class Effect;
+	class Scene;
 
 	struct RendererInitResult {
 		std::string stage;
@@ -53,6 +54,8 @@ namespace dae
 		// Color buffer
 		ID3D11Texture2D* m_pRenderTargetBuffer{};
 		ID3D11RenderTargetView* m_pRenderTargetView{};
+
+		Scene* m_pScene{};
 
 		int m_Width{};
 		int m_Height{};

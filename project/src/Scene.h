@@ -2,14 +2,14 @@
 
 #include <vector>
 
-#include "Mesh.h"
-#include "Effect.h"
+//#include "Mesh.h"
+//#include "Effect.h"
 
 class ID3D11Device;
 
 namespace dae {
-	//class Mesh;
-	//class Effect;
+	class Mesh;
+	class Effect;
 
 	struct Container {
 		Mesh* mesh;

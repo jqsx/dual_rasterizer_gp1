@@ -1,10 +1,10 @@
+#include "Effect.h"
+
 #include <iostream>
 #include <d3dcompiler.h>
 #include <dxgi.h>
 #include <d3d11.h>
 #include <d3dx11effect.h>
-
-#include "Effect.h"
 
 ID3DX11Effect* dae::Effect::LoadEffect(ID3D11Device* pDevice, const std::wstring assetFile) {
 	HRESULT result;

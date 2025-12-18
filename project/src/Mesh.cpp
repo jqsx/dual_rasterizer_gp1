@@ -1,8 +1,7 @@
+#include "Mesh.h"
 #include <d3d11.h>
 #include <dxgi.h>
 #include <d3dcompiler.h>
-
-#include "Mesh.h"
 
 dae::Mesh::Mesh(ID3D11Device* pDevice, const std::vector<Vertex>& vertices, const std::vector<unsigned int>& indices) : m_NumIndices{0}, m_pIndexBuffer{nullptr}, m_pVertexBuffer{nullptr}
 {

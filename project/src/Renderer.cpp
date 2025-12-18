@@ -5,6 +5,8 @@
 // Standard includes
 #include <iostream>
 
+#include "Scene.h"
+
 //Project includes
 #include "Renderer.h"
 
@@ -23,6 +25,9 @@ Renderer::Renderer(SDL_Window* pWindow) :
 	{
 		m_IsInitialized = true;
 		std::cout << "DirectX is initialized and ready!\n";
+
+		m_pScene = new Scene();
+		m_pScene->InitializeScene(m_pDevice);
 	}
 	else
 	{
@@ -34,6 +39,7 @@ Renderer::Renderer(SDL_Window* pWindow) :
 
 Renderer::~Renderer()
 {
+	delete m_pScene;
 	_RELEASE(m_pRenderTargetView)
 	_RELEASE(m_pRenderTargetBuffer)
 	_RELEASE(m_pDepthStencilView)
@@ -72,6 +78,10 @@ void Renderer::Render() const
 	// Invoke draw calls
 
 	// present backbuffer
+
+	for (const Container& container : m_pScene->GetContainers()) {
+		RenderUsing(container.mesh, container.effect);
+	}
 
 	m_pDxgiSwapChain->Present(0, 0);
 }

@@ -3,7 +3,7 @@
 class ID3DX11Effect;
 class ID3DX11EffectTechnique;
 class ID3D11InputLayout;
-class ID3DX11Device;
+class ID3D11Device;
 
 #include <string>
 
