@@ -11,7 +11,7 @@ namespace dae
 
 		void MaxToOne()
 		{
-			const float maxValue = fmaxf(r, fmaxf(g, b));
+			const float maxValue = std::max(r, std::max(g, b));
 			if (maxValue > 1.f)
 				*this /= maxValue;
 		}

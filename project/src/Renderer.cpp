@@ -5,13 +5,12 @@
 // Standard includes
 #include <iostream>
 
-#include "Scene.h"
-
 //Project includes
 #include "Renderer.h"
 
 using namespace dae;
 
+#pragma region Renderer
 Renderer::Renderer(SDL_Window* pWindow) :
 	m_pWindow(pWindow)
 {
@@ -39,13 +38,12 @@ Renderer::Renderer(SDL_Window* pWindow) :
 
 Renderer::~Renderer()
 {
-	delete m_pScene;
 	_RELEASE(m_pRenderTargetView)
 	_RELEASE(m_pRenderTargetBuffer)
 	_RELEASE(m_pDepthStencilView)
 	_RELEASE(m_pDepthStencilBuffer)
 	_RELEASE(m_pDxgiSwapChain)
-	
+
 	if (m_pDeviceContext) {
 		m_pDeviceContext->ClearState();
 		m_pDeviceContext->Flush();
@@ -58,9 +56,6 @@ Renderer::~Renderer()
 
 void Renderer::Update(const Timer* pTimer)
 {
-	if (!m_IsInitialized)
-		return;
-
 
 }
 
@@ -69,21 +64,6 @@ void Renderer::Render() const
 {
 	if (!m_IsInitialized)
 		return;
-
-	constexpr float color[4] = { 0.0f, 0.0f, 0.3f, 1.0f };
-
-	m_pDeviceContext->ClearRenderTargetView(m_pRenderTargetView, color);
-	m_pDeviceContext->ClearDepthStencilView(m_pDepthStencilView, D3D11_CLEAR_DEPTH | D3D11_CLEAR_STENCIL, 1.0f, 0);
-
-	// Invoke draw calls
-
-	// present backbuffer
-
-	for (const Container& container : m_pScene->GetContainers()) {
-		RenderUsing(container.mesh, container.effect);
-	}
-
-	m_pDxgiSwapChain->Present(0, 0);
 }
 
 HRESULT Renderer::InitializeDirectX(RendererInitResult& value)
@@ -196,7 +176,187 @@ HRESULT Renderer::InitializeDirectX(RendererInitResult& value)
 	return S_OK;
 }
 
-void dae::Renderer::RenderUsing(const Mesh* pMesh, const Effect* pEffect) const
+#pragma endregion Renderer
+
+#pragma region Effect
+ID3DX11Effect* dae::Effect::LoadEffect(ID3D11Device* pDevice, const std::wstring assetFile) {
+	HRESULT result;
+	ID3D10Blob* pErrorBlob{ nullptr };
+	ID3DX11Effect* pEffect;
+
+	DWORD shaderFlags = 0;
+#if defined(DEBUG) || defined(_DEBUG)
+	shaderFlags |= D3DCOMPILE_DEBUG;
+	shaderFlags |= D3DCOMPILE_SKIP_OPTIMIZATION;
+#endif
+
+	result = D3DX11CompileEffectFromFile(assetFile.c_str(), nullptr, nullptr, shaderFlags, 0, pDevice, &pEffect, &pErrorBlob);
+	if (FAILED(result)) {
+		if (pErrorBlob != nullptr) {
+			const char* pErrors = static_cast<char*>(pErrorBlob->GetBufferPointer());
+
+			for (unsigned int i = 0; i < pErrorBlob->GetBufferSize(); i++) {
+				std::wcout << pErrors[i];
+			}
+
+			pErrorBlob->Release();
+			pErrorBlob = nullptr;
+		}
+		else {
+			std::wcout << "EffectLoader: Failed to CreateEffectFromFile!\nPath: " << assetFile << std::endl;
+			return nullptr;
+		}
+	}
+
+	return pEffect;
+}
+
+dae::Effect::Effect(ID3D11Device* pDevice, const std::wstring assetFile) : m_pEffect{ nullptr }, m_pInputLayout{ nullptr }, m_pTechnique{ nullptr }
+{
+	m_pEffect = LoadEffect(pDevice, assetFile); // Logs errors
+	if (m_pEffect != nullptr) { // Avoids accessing nullptr
+		m_pTechnique = m_pEffect->GetTechniqueByName("DefaultTechnique");
+
+		// Vertex Layout
+		static constexpr uint32_t numElements{ 2 };
+		D3D11_INPUT_ELEMENT_DESC vertexDesc[numElements]{};
+
+		vertexDesc[0].SemanticName = "POSITION";
+		vertexDesc[0].Format = DXGI_FORMAT_R32G32B32A32_FLOAT;
+		vertexDesc[0].AlignedByteOffset = 0;
+		vertexDesc[0].InputSlotClass = D3D11_INPUT_PER_VERTEX_DATA;
+
+		vertexDesc[1].SemanticName = "COLOR";
+		vertexDesc[1].Format = DXGI_FORMAT_R32G32B32A32_FLOAT;
+		vertexDesc[1].AlignedByteOffset = 12;
+		vertexDesc[1].InputSlotClass = D3D11_INPUT_PER_VERTEX_DATA;
+
+		// Input Layout
+		D3DX11_PASS_DESC passDesc{};
+		m_pTechnique->GetPassByIndex(0)->GetDesc(&passDesc);
+
+		const HRESULT result = pDevice->CreateInputLayout(vertexDesc, numElements, passDesc.pIAInputSignature, passDesc.IAInputSignatureSize, &m_pInputLayout);
+		if (FAILED(result))
+			return;
+	}
+}
+
+dae::Effect::~Effect()
+{
+	if (m_pInputLayout != nullptr) {
+		m_pInputLayout->Release();
+		m_pInputLayout = nullptr;
+	}
+	if (m_pTechnique != nullptr) {
+		m_pTechnique->Release();
+		m_pTechnique = nullptr;
+	}
+	if (m_pEffect != nullptr) {
+		m_pEffect->Release();
+		m_pEffect = nullptr;
+	}
+}
+
+#pragma endregion Effect
+
+#pragma region Mesh
+dae::Mesh::Mesh(ID3D11Device* pDevice, const std::vector<Vertex>& vertices, const std::vector<unsigned int>& indices) : m_NumIndices{ 0 }, m_pIndexBuffer{ nullptr }, m_pVertexBuffer{ nullptr }
+{
+	D3D11_BUFFER_DESC bd = {};
+	bd.Usage = D3D11_USAGE_IMMUTABLE;
+	bd.ByteWidth = sizeof(Vertex) * static_cast<uint32_t>(vertices.size());
+	bd.BindFlags = D3D11_BIND_VERTEX_BUFFER;
+	bd.CPUAccessFlags = 0;
+	bd.MiscFlags = 0;
+
+	D3D11_SUBRESOURCE_DATA initData = {};
+	initData.pSysMem = vertices.data();
+
+	HRESULT result = pDevice->CreateBuffer(&bd, &initData, &m_pVertexBuffer);
+	if (FAILED(result))
+		return;
+
+	m_NumIndices = static_cast<uint32_t>(indices.size());
+	bd.ByteWidth = sizeof(uint32_t) * m_NumIndices;
+	bd.BindFlags = D3D11_BIND_INDEX_BUFFER;
+
+	initData.pSysMem = indices.data();
+	result = pDevice->CreateBuffer(&bd, &initData, &m_pIndexBuffer);
+	if (FAILED(result))
+		return;
+}
+
+dae::Mesh::~Mesh()
+{
+	if (m_pVertexBuffer != nullptr) {
+		m_pVertexBuffer->Release();
+		m_pVertexBuffer = nullptr;
+	}
+	if (m_pIndexBuffer != nullptr) {
+		m_pIndexBuffer->Release();
+		m_pIndexBuffer = nullptr;
+	}
+}
+
+#pragma endregion Mesh
+
+#pragma region Scene
+
+void dae::Scene::AddEffect(Effect* effect)
+{
+	m_Effects.emplace_back(effect);
+}
+
+void dae::Scene::AddMesh(Mesh* mesh)
+{
+	m_Meshes.emplace_back(mesh);
+}
+
+void dae::Scene::AddContainer(Container& container)
+{
+	m_Containers.emplace_back(container);
+}
+
+dae::Scene::Scene()
 {
 
 }
+
+dae::Scene::~Scene()
+{
+	m_Containers.clear();
+	for (Mesh* mesh : m_Meshes) {
+		delete mesh;
+	}
+	m_Meshes.clear();
+	for (Effect* effect : m_Effects) {
+		delete effect;
+	}
+	m_Effects.clear();
+}
+
+void dae::Scene::InitializeScene(ID3D11Device* pDevice)
+{
+	std::vector<dae::Vertex> vertices{
+		{ { 0.f, 0.5f, 0.5f }, { 1.0f, 0.0f, 0.0f } },
+		{ { 0.5f, -0.5f, 0.5f }, { 0.0f, 0.0f, 1.0f } },
+		{ { -0.5f, -0.5f, 0.5f }, { 0.0f, 1.0f, 0.0f } }
+	};
+	std::vector<uint32_t> indices{ 0, 1, 2 };
+	Mesh* helloTriangle = new dae::Mesh(pDevice, vertices, indices);
+
+	AddMesh(helloTriangle);
+
+	Effect* posColEffect = new dae::Effect(pDevice, L"./resources/PosCol3D.fx");
+
+	AddEffect(posColEffect);
+
+	Container container{};
+
+	container.effect = posColEffect;
+	container.mesh = helloTriangle;
+
+	AddContainer(container);
+}
+
+#pragma endregion Scene

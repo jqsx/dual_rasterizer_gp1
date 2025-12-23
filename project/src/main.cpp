@@ -32,7 +32,6 @@ int main(int argc, char* args[])
 	// Leak detection
 	#if defined(_DEBUG)
 		LeakDetector detector{};
-		std::cout << "Leak detector initialized." << std::endl;
 	#endif
 
 	//Create window + surfaces
@@ -53,8 +52,6 @@ int main(int argc, char* args[])
 	//Initialize "framework"
 	const auto pTimer = new Timer();
 	const auto pRenderer = new Renderer(pWindow);
-
-	// Can create the scene and objects after DirectX init
 
 	//Start loop
 	pTimer->Start();
@@ -101,9 +98,5 @@ int main(int argc, char* args[])
 	delete pTimer;
 
 	ShutDown(pWindow);
-
-#ifdef _DEBUG
-	detector.CheckForLeaks();
-#endif 
 	return 0;
 }

@@ -1,7 +1,6 @@
 # Source files
-
-# Replaced the original SOURCE stuff with a static library because it wouldn't let me add new files.
-add_library(cf STATIC
+set(SOURCES 
+    "src/main.cpp"
     "src/LeakDetector.cpp"
     "src/Matrix.cpp"
     "src/Renderer.cpp"
@@ -9,16 +8,10 @@ add_library(cf STATIC
 	"src/Vector2.cpp"
     "src/Vector3.cpp"
     "src/Vector4.cpp"
-    "src/Effect.cpp"
-    "src/Mesh.cpp"
-    "src/Scene.cpp"
 )
 
 # Create the executable
-add_executable(${PROJECT_NAME} "src/main.cpp")
-
-# link the sources to the project
-target_link_libraries(${PROJECT_NAME} PRIVATE cf)
+add_executable(${PROJECT_NAME} ${SOURCES})
 
 # DirectX11
 option(DIRECTX_11_ENABLED "Enable DirectX 11 Support" ON)
@@ -27,7 +20,6 @@ if(DIRECTX_11_ENABLED)
     find_library(D3D11_LIBRARY d3d11.lib)
     if(DXGI_LIBRARY AND D3D11_LIBRARY)
         target_link_libraries(${PROJECT_NAME} PRIVATE ${DXGI_LIBRARY} ${D3D11_LIBRARY})
-        target_link_libraries(cf PRIVATE ${DXGI_LIBRARY} ${D3D11_LIBRARY})
     else()
         message(FATAL_ERROR "DirectX libraries not found")
     endif()
@@ -57,7 +49,6 @@ set_target_properties(SDL PROPERTIES
     INTERFACE_INCLUDE_DIRECTORIES "${SDL_DIR}/include"
 )
 target_link_libraries(${PROJECT_NAME} PRIVATE SDL)
-target_link_libraries(cf PRIVATE SDL)
 
 file(GLOB_RECURSE DLL_FILES
     "${SDL_DIR}/lib/x64/*.dll"
@@ -78,7 +69,6 @@ set_target_properties(SDL_IMAGE PROPERTIES
     INTERFACE_INCLUDE_DIRECTORIES "${SDL_IMAGE_DIR}/include"
 )
 target_link_libraries(${PROJECT_NAME} PRIVATE SDL_IMAGE)
-target_link_libraries(cf PRIVATE SDL_IMAGE)
 
 file(GLOB_RECURSE DLL_FILES
     "${SDL_IMAGE_DIR}/lib/x64/*.dll"
@@ -105,5 +95,4 @@ if(DIRECTX_11_ENABLED)
         INTERFACE_INCLUDE_DIRECTORIES "${FX_DIR}/include"
     )
     target_link_libraries(${PROJECT_NAME} PRIVATE FX)
-    target_link_libraries(cf PRIVATE FX)
 endif()

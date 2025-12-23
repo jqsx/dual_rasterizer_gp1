@@ -14,12 +14,66 @@
 
 // Framework Headers
 #include "Timer.h"
+#include "Vector3.h"
+#include "ColorRGB.h"
 
 namespace dae
 {
-	class Mesh;
-	class Effect;
-	class Scene;
+	class Effect {
+		ID3DX11Effect* m_pEffect;
+		ID3DX11EffectTechnique* m_pTechnique;
+		ID3D11InputLayout* m_pInputLayout;
+
+		static ID3DX11Effect* LoadEffect(ID3D11Device* pDevice, const std::wstring assetFile);
+
+	public:
+		explicit Effect(ID3D11Device* pDevice, const std::wstring assetFile);
+		~Effect();
+
+		ID3D11InputLayout* GetInputLayout() const { return m_pInputLayout; }
+		ID3DX11EffectTechnique* GetTechnique() const { return m_pTechnique; }
+	};
+
+	struct Vertex {
+		Vector3 Position;
+		ColorRGB Color;
+	};
+
+	class Mesh {
+		ID3D11Buffer* m_pVertexBuffer;
+		ID3D11Buffer* m_pIndexBuffer;
+
+		uint32_t m_NumIndices;
+	public:
+		explicit Mesh(ID3D11Device* pDevice, const std::vector<Vertex>& vertices, const std::vector<unsigned int>& indices);
+		~Mesh();
+
+		ID3D11Buffer* GetVertexBuffer() const { return m_pVertexBuffer; }
+		ID3D11Buffer* GetIndexBuffer() const { return m_pIndexBuffer; }
+	};
+
+	struct Container {
+		Mesh* mesh;
+		Effect* effect;
+	};
+
+	class Scene {
+		std::vector<Container> m_Containers{};
+		std::vector<Mesh*> m_Meshes{};
+		std::vector<Effect*> m_Effects{};
+
+		void AddEffect(Effect* effect);
+		void AddMesh(Mesh* mesh);
+		void AddContainer(Container& container);
+
+	public:
+		Scene();
+		~Scene();
+
+		void InitializeScene(ID3D11Device* pDevice);
+
+		const std::vector<Container>& GetContainers() const { return m_Containers; };
+	};
 
 	struct RendererInitResult {
 		std::string stage;
@@ -65,10 +119,7 @@ namespace dae
 		//DIRECTX
 		HRESULT InitializeDirectX(RendererInitResult& value);
 
-		void RenderUsing(const Mesh* pMesh, const Effect* pEffect) const;
-
 #define _RELEASE(resource_ptr) if (resource_ptr != nullptr) { resource_ptr->Release(); resource_ptr = nullptr; }
-
 		//...
 	};
 }
