@@ -32,6 +32,7 @@ int main(int argc, char* args[])
 	// Leak detection
 	#if defined(_DEBUG)
 		LeakDetector detector{};
+		//detector.BreakOnAllocationId(288);
 	#endif
 
 	//Create window + surfaces
@@ -41,7 +42,7 @@ int main(int argc, char* args[])
 	const uint32_t height = 480;
 
 	SDL_Window* pWindow = SDL_CreateWindow(
-		"DirectX - ***Insert Name/Class***",
+		"DirectX - Franciszek Rakowiecki GD10",
 		SDL_WINDOWPOS_UNDEFINED,
 		SDL_WINDOWPOS_UNDEFINED,
 		width, height, 0);
@@ -98,5 +99,6 @@ int main(int argc, char* args[])
 	delete pTimer;
 
 	ShutDown(pWindow);
+
 	return 0;
 }

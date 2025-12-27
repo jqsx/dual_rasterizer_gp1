@@ -50,6 +50,7 @@ namespace dae
 
 		ID3D11Buffer* GetVertexBuffer() const { return m_pVertexBuffer; }
 		ID3D11Buffer* GetIndexBuffer() const { return m_pIndexBuffer; }
+		uint32_t GetNumIndices() const { return m_NumIndices; }
 	};
 
 	struct Container {

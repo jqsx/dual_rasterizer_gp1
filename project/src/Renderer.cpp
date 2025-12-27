@@ -38,6 +38,8 @@ Renderer::Renderer(SDL_Window* pWindow) :
 
 Renderer::~Renderer()
 {
+	delete m_pScene;
+
 	_RELEASE(m_pRenderTargetView)
 	_RELEASE(m_pRenderTargetBuffer)
 	_RELEASE(m_pDepthStencilView)
@@ -64,6 +66,27 @@ void Renderer::Render() const
 {
 	if (!m_IsInitialized)
 		return;
+	
+	m_pDeviceContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+
+	for (const Container& container : m_pScene->GetContainers()) {
+		m_pDeviceContext->IASetInputLayout(container.effect->GetInputLayout());
+
+		constexpr UINT stride = sizeof(Vertex);
+		constexpr UINT offset = 0;
+
+		ID3D11Buffer* vertex_buffer = container.mesh->GetVertexBuffer();
+
+		m_pDeviceContext->IASetVertexBuffers(0, 1, &vertex_buffer, &stride, &offset);
+		m_pDeviceContext->IASetIndexBuffer(container.mesh->GetIndexBuffer(), DXGI_FORMAT_R32_UINT, 0);
+
+		D3DX11_TECHNIQUE_DESC techdesc{};
+		container.effect->GetTechnique()->GetDesc(&techdesc);
+		for (UINT p = 0; p < techdesc.Passes; p++) {
+			container.effect->GetTechnique()->GetPassByIndex(p)->Apply(0, m_pDeviceContext);
+			m_pDeviceContext->DrawIndexed(container.mesh->GetNumIndices(), 0, 0);
+		}
+	}
 }
 
 HRESULT Renderer::InitializeDirectX(RendererInitResult& value)
@@ -196,7 +219,7 @@ ID3DX11Effect* dae::Effect::LoadEffect(ID3D11Device* pDevice, const std::wstring
 			const char* pErrors = static_cast<char*>(pErrorBlob->GetBufferPointer());
 
 			for (unsigned int i = 0; i < pErrorBlob->GetBufferSize(); i++) {
-				std::wcout << pErrors[i];
+				std::cout << pErrors[i];
 			}
 
 			pErrorBlob->Release();
@@ -204,6 +227,10 @@ ID3DX11Effect* dae::Effect::LoadEffect(ID3D11Device* pDevice, const std::wstring
 		}
 		else {
 			std::wcout << "EffectLoader: Failed to CreateEffectFromFile!\nPath: " << assetFile << std::endl;
+			if (pEffect != nullptr) {
+				pEffect->Release();
+				pEffect = nullptr;
+			}
 			return nullptr;
 		}
 	}
@@ -274,7 +301,10 @@ dae::Mesh::Mesh(ID3D11Device* pDevice, const std::vector<Vertex>& vertices, cons
 
 	HRESULT result = pDevice->CreateBuffer(&bd, &initData, &m_pVertexBuffer);
 	if (FAILED(result))
+	{
+		std::cout << "Failed to initialize vertex buffer." << std::endl;
 		return;
+	}
 
 	m_NumIndices = static_cast<uint32_t>(indices.size());
 	bd.ByteWidth = sizeof(uint32_t) * m_NumIndices;
@@ -282,8 +312,12 @@ dae::Mesh::Mesh(ID3D11Device* pDevice, const std::vector<Vertex>& vertices, cons
 
 	initData.pSysMem = indices.data();
 	result = pDevice->CreateBuffer(&bd, &initData, &m_pIndexBuffer);
-	if (FAILED(result))
+	if (FAILED(result)) {
+		std::cout << "Failed to initialize index buffer." << std::endl;
 		return;
+	}
+
+	std::cout << "Successfully created mesh." << std::endl;
 }
 
 dae::Mesh::~Mesh()
