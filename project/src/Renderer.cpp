@@ -66,6 +66,20 @@ void Renderer::Render() const
 {
 	if (!m_IsInitialized)
 		return;
+
+	const float clearColor[4] = { 0.1f, 0.1f, 0.3f, 1.0f };
+
+	m_pDeviceContext->ClearRenderTargetView(
+		m_pRenderTargetView,
+		clearColor
+	);
+
+	m_pDeviceContext->ClearDepthStencilView(
+		m_pDepthStencilView,
+		D3D11_CLEAR_DEPTH | D3D11_CLEAR_STENCIL,
+		1.0f,
+		0
+	);
 	
 	m_pDeviceContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
@@ -87,6 +101,8 @@ void Renderer::Render() const
 			m_pDeviceContext->DrawIndexed(container.mesh->GetNumIndices(), 0, 0);
 		}
 	}
+
+	m_pDxgiSwapChain->Present(0, 0);
 }
 
 HRESULT Renderer::InitializeDirectX(RendererInitResult& value)
