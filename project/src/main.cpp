@@ -58,6 +58,9 @@ int main(int argc, char* args[])
 	pTimer->Start();
 	float printTimer = 0.f;
 	bool isLooping = true;
+
+	bool lmb{0}, rmb{ 0 };
+	
 	while (isLooping)
 	{
 		//--------- Get input events ---------
@@ -73,12 +76,29 @@ int main(int argc, char* args[])
 				//Test for a key
 				//if (e.key.keysym.scancode == SDL_SCANCODE_X)
 				break;
-			default: ;
+			case SDL_MOUSEBUTTONUP:
+				if (e.button.button == SDL_BUTTON_LEFT)
+					lmb = false;
+				else if (e.button.button == SDL_BUTTON_RIGHT) {
+					rmb = false;
+				}
+				break;
+			case SDL_MOUSEBUTTONDOWN:
+				if (e.button.button == SDL_BUTTON_LEFT)
+					lmb = true;
+				else if (e.button.button == SDL_BUTTON_RIGHT) {
+					rmb = true;
+				}
+				break;
+			default:
+				break;
 			}
 		}
 
+		SDL_SetRelativeMouseMode(lmb || rmb ? SDL_TRUE : SDL_FALSE);
+
 		//--------- Update ---------
-		pRenderer->Update(pTimer);
+		pRenderer->Update(pTimer, lmb, rmb);
 
 		//--------- Render ---------
 		pRenderer->Render();

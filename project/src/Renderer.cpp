@@ -5,6 +5,8 @@
 // Standard includes
 #include <iostream>
 
+#include "Utils.h"
+
 //Project includes
 #include "Renderer.h"
 
@@ -26,6 +28,7 @@ Renderer::Renderer(SDL_Window* pWindow) :
 		std::cout << "DirectX is initialized and ready!\n";
 
 		m_pScene = new Scene();
+		m_Camera.Initialize(45.f, { 0.0f, 0.0f, -10.0f });
 		m_pScene->InitializeScene(m_pDevice);
 	}
 	else
@@ -40,11 +43,12 @@ Renderer::~Renderer()
 {
 	delete m_pScene;
 
-	_RELEASE(m_pRenderTargetView)
-	_RELEASE(m_pRenderTargetBuffer)
-	_RELEASE(m_pDepthStencilView)
-	_RELEASE(m_pDepthStencilBuffer)
-	_RELEASE(m_pDxgiSwapChain)
+	_RELEASE_DX11_PTR(m_pRenderTargetView)
+		
+	_RELEASE_DX11_PTR(m_pRenderTargetBuffer)
+	_RELEASE_DX11_PTR(m_pDepthStencilView)
+	_RELEASE_DX11_PTR(m_pDepthStencilBuffer)
+	_RELEASE_DX11_PTR(m_pDxgiSwapChain)
 
 	if (m_pDeviceContext) {
 		m_pDeviceContext->ClearState();
@@ -52,13 +56,14 @@ Renderer::~Renderer()
 		m_pDeviceContext->Release();
 		m_pDeviceContext = nullptr;
 	}
-	_RELEASE(m_pDevice)
-	_RELEASE(m_pDxgiFactory)
+	_RELEASE_DX11_PTR(m_pDevice)
+	_RELEASE_DX11_PTR(m_pDxgiFactory)
 }
 
-void Renderer::Update(const Timer* pTimer)
+void Renderer::Update(const Timer* pTimer, bool leftClick, bool rightClick)
 {
-
+	m_Camera.aspect = float(m_Width) / float(m_Height);
+	m_Camera.Update(pTimer, leftClick, rightClick);
 }
 
 
@@ -93,6 +98,22 @@ void Renderer::Render() const
 
 		m_pDeviceContext->IASetVertexBuffers(0, 1, &vertex_buffer, &stride, &offset);
 		m_pDeviceContext->IASetIndexBuffer(container.mesh->GetIndexBuffer(), DXGI_FORMAT_R32_UINT, 0);
+
+		Matrix projView = m_Camera.viewMatrix * m_Camera.projectionMatrix;
+
+		std::cout << std::endl;
+
+		for (size_t i = 0; i < 4; i++)
+		{
+			std::cout << "[ ";
+			for (size_t j = 0; j < 4; j++)
+			{
+				std::cout << projView[i][j] << ", ";
+			}
+			std::cout << " ] " << std::endl;
+		}
+
+		container.effect->SetWorldViewProj(projView);
 
 		D3DX11_TECHNIQUE_DESC techdesc{};
 		container.effect->GetTechnique()->GetDesc(&techdesc);
@@ -254,14 +275,14 @@ ID3DX11Effect* dae::Effect::LoadEffect(ID3D11Device* pDevice, const std::wstring
 	return pEffect;
 }
 
-dae::Effect::Effect(ID3D11Device* pDevice, const std::wstring assetFile) : m_pEffect{ nullptr }, m_pInputLayout{ nullptr }, m_pTechnique{ nullptr }
+dae::Effect::Effect(ID3D11Device* pDevice, const std::wstring assetFile) : m_pEffect{ nullptr }, m_pInputLayout{ nullptr }, m_pTechnique{ nullptr }, m_pWorldViewProjection{ nullptr }
 {
 	m_pEffect = LoadEffect(pDevice, assetFile); // Logs errors
 	if (m_pEffect != nullptr) { // Avoids accessing nullptr
 		m_pTechnique = m_pEffect->GetTechniqueByName("DefaultTechnique");
 
 		// Vertex Layout
-		static constexpr uint32_t numElements{ 2 };
+		static constexpr uint32_t numElements{ 5 };
 		D3D11_INPUT_ELEMENT_DESC vertexDesc[numElements]{};
 
 		vertexDesc[0].SemanticName = "POSITION";
@@ -274,6 +295,21 @@ dae::Effect::Effect(ID3D11Device* pDevice, const std::wstring assetFile) : m_pEf
 		vertexDesc[1].AlignedByteOffset = 12;
 		vertexDesc[1].InputSlotClass = D3D11_INPUT_PER_VERTEX_DATA;
 
+		vertexDesc[2].SemanticName = "TEXCOORD";
+		vertexDesc[2].Format = DXGI_FORMAT_R32G32B32A32_FLOAT;
+		vertexDesc[2].AlignedByteOffset = 8;
+		vertexDesc[2].InputSlotClass = D3D11_INPUT_PER_VERTEX_DATA;
+
+		vertexDesc[3].SemanticName = "NORMAL";
+		vertexDesc[3].Format = DXGI_FORMAT_R32G32B32A32_FLOAT;
+		vertexDesc[3].AlignedByteOffset = 12;
+		vertexDesc[3].InputSlotClass = D3D11_INPUT_PER_VERTEX_DATA;
+
+		vertexDesc[4].SemanticName = "TANGENT";
+		vertexDesc[4].Format = DXGI_FORMAT_R32G32B32A32_FLOAT;
+		vertexDesc[4].AlignedByteOffset = 12;
+		vertexDesc[4].InputSlotClass = D3D11_INPUT_PER_VERTEX_DATA;
+
 		// Input Layout
 		D3DX11_PASS_DESC passDesc{};
 		m_pTechnique->GetPassByIndex(0)->GetDesc(&passDesc);
@@ -281,23 +317,38 @@ dae::Effect::Effect(ID3D11Device* pDevice, const std::wstring assetFile) : m_pEf
 		const HRESULT result = pDevice->CreateInputLayout(vertexDesc, numElements, passDesc.pIAInputSignature, passDesc.IAInputSignatureSize, &m_pInputLayout);
 		if (FAILED(result))
 			return;
+
+		m_pWorldViewProjection = m_pEffect->GetVariableByName("gWorldViewProj")->AsMatrix();
+
+		if (!m_pWorldViewProjection->IsValid()) {
+			std::wcout << "Missing gWorldViewProj from shader.\n";
+		}
 	}
 }
 
 dae::Effect::~Effect()
 {
-	if (m_pInputLayout != nullptr) {
-		m_pInputLayout->Release();
-		m_pInputLayout = nullptr;
-	}
-	if (m_pTechnique != nullptr) {
-		m_pTechnique->Release();
-		m_pTechnique = nullptr;
-	}
-	if (m_pEffect != nullptr) {
-		m_pEffect->Release();
-		m_pEffect = nullptr;
-	}
+	_RELEASE_DX11_PTR(m_pInputLayout)
+	_RELEASE_DX11_PTR(m_pTechnique)
+	_RELEASE_DX11_PTR(m_pEffect)
+}
+
+void dae::Effect::SetWorldViewProj(const Matrix& m)
+{
+	if (m_pWorldViewProjection == nullptr)
+		return;
+	if (!m_pWorldViewProjection->IsValid())
+		return;
+	//float values[16];
+
+	//for (int y{}, index{}; y < 4; y++) {
+	//	for (int x = 0; x < 4; x++, index++)
+	//	{
+	//		values[index] = m[y][x];
+	//	}
+	//}
+
+	m_pWorldViewProjection->SetMatrix((float*)&m);
 }
 
 #pragma endregion Effect
@@ -337,15 +388,9 @@ dae::Mesh::Mesh(ID3D11Device* pDevice, const std::vector<Vertex>& vertices, cons
 }
 
 dae::Mesh::~Mesh()
-{
-	if (m_pVertexBuffer != nullptr) {
-		m_pVertexBuffer->Release();
-		m_pVertexBuffer = nullptr;
-	}
-	if (m_pIndexBuffer != nullptr) {
-		m_pIndexBuffer->Release();
-		m_pIndexBuffer = nullptr;
-	}
+{	
+	_RELEASE_DX11_PTR(m_pVertexBuffer)
+	_RELEASE_DX11_PTR(m_pIndexBuffer)
 }
 
 #pragma endregion Mesh
@@ -387,15 +432,31 @@ dae::Scene::~Scene()
 
 void dae::Scene::InitializeScene(ID3D11Device* pDevice)
 {
-	std::vector<dae::Vertex> vertices{
-		{ { 0.f, 0.5f, 0.5f }, { 1.0f, 0.0f, 0.0f } },
-		{ { 0.5f, -0.5f, 0.5f }, { 0.0f, 0.0f, 1.0f } },
-		{ { -0.5f, -0.5f, 0.5f }, { 0.0f, 1.0f, 0.0f } }
-	};
-	std::vector<uint32_t> indices{ 0, 1, 2 };
-	Mesh* helloTriangle = new dae::Mesh(pDevice, vertices, indices);
+	Mesh* helloTriangle;
+	Mesh* vehicle;
+
+	{
+		std::vector<dae::Vertex> vertices{
+			{ { 0.f, 0.5f, 0.5f }, { 1.0f, 0.0f, 0.0f } },
+			{ { 0.5f, -0.5f, 0.5f }, { 0.0f, 0.0f, 1.0f } },
+			{ { -0.5f, -0.5f, 0.5f }, { 0.0f, 1.0f, 0.0f } }
+		};
+		std::vector<uint32_t> indices{ 0, 1, 2 };
+		helloTriangle = new dae::Mesh(pDevice, vertices, indices);
+	}
+
+	{
+		std::vector<dae::Vertex> vertices{};
+		std::vector<uint32_t> indices{};
+
+		if (Utils::ParseOBJ("./resources/vehicle.obj", vertices, indices)) {
+			std::cout << "Parsed vehicle obj" << std::endl;
+		}
+		vehicle = new Mesh(pDevice, vertices, indices);
+	}
 
 	AddMesh(helloTriangle);
+	AddMesh(vehicle);
 
 	Effect* posColEffect = new dae::Effect(pDevice, L"./resources/PosCol3D.fx");
 
@@ -404,7 +465,7 @@ void dae::Scene::InitializeScene(ID3D11Device* pDevice)
 	Container container{};
 
 	container.effect = posColEffect;
-	container.mesh = helloTriangle;
+	container.mesh = vehicle;
 
 	AddContainer(container);
 }

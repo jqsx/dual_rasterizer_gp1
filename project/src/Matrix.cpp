@@ -188,14 +188,44 @@ namespace dae {
 
 	Matrix Matrix::CreateLookAtLH(const Vector3& origin, const Vector3& forward, const Vector3& up)
 	{
-		//TODO
-		return {};
+		//const Vector3 f = forward.Normalized();
+		//const Vector3 r{ Vector3::Cross(up, f).Normalized() };
+		//const Vector3 u{ Vector3::Cross(f, r) };
+
+		//Matrix m{};
+
+		//m[0][0] = r.x;  m[0][1] = u.x;  m[0][2] = f.x;  m[0][3] = 0.0f;
+		//m[1][0] = r.y;  m[1][1] = u.y;  m[1][2] = f.y;  m[1][3] = 0.0f;
+		//m[2][0] = r.z;  m[2][1] = u.z;  m[2][2] = f.z;  m[2][3] = 0.0f;
+
+		//m[3][0] = -Vector3::Dot(r, origin);
+		//m[3][1] = -Vector3::Dot(u, origin);
+		//m[3][2] = -Vector3::Dot(f, origin);
+		//m[3][3] = 1.0f;
+
+		Matrix m{ Vector3::Cross(forward, up).Normalized(), up.Normalized(), forward.Normalized(), origin };
+
+		return m.Inverse();
 	}
 
 	Matrix Matrix::CreatePerspectiveFovLH(float fov, float aspect, float zn, float zf)
 	{
-		//TODO
-		return {};
+		const float fovRad = fov * float(3.14) / 180.f;
+		const float tan2 = tanf(fovRad * 0.5f);
+		Matrix m { 
+			{1.0f / (aspect * tan2) , 0.0f, 0.0f, 0.0f},
+			{ 0.0f, 1.0f / tan2, 0.0f, 0.0f },
+			{ 0.0f, 0.0f, zf / (zf - zn), 1.0f },
+			{ 0.0f, 0.0f, -(zf * zn) / (zf - zn), 0.0f  }
+		};
+
+		//m[0][0] = 1.0f / (aspect * tan2);
+		//m[1][1] = 1.0f / tan2;
+		//m[2][2] = zf / (zf - zn);
+		//m[3][2] = ;
+		//m[2][3] = 1.0f;
+
+		return m;
 	}
 
 	Vector3 Matrix::GetAxisX() const

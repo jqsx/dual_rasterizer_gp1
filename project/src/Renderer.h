@@ -15,14 +15,20 @@
 // Framework Headers
 #include "Timer.h"
 #include "Vector3.h"
+#include "Vector2.h"
 #include "ColorRGB.h"
+
+#include "Camera.h"
 
 namespace dae
 {
+
 	class Effect {
 		ID3DX11Effect* m_pEffect;
 		ID3DX11EffectTechnique* m_pTechnique;
 		ID3D11InputLayout* m_pInputLayout;
+
+		ID3DX11EffectMatrixVariable* m_pWorldViewProjection;
 
 		static ID3DX11Effect* LoadEffect(ID3D11Device* pDevice, const std::wstring assetFile);
 
@@ -32,11 +38,16 @@ namespace dae
 
 		ID3D11InputLayout* GetInputLayout() const { return m_pInputLayout; }
 		ID3DX11EffectTechnique* GetTechnique() const { return m_pTechnique; }
+
+		void SetWorldViewProj(const Matrix& m);
 	};
 
 	struct Vertex {
 		Vector3 Position;
 		ColorRGB Color;
+		Vector2 Uv{};
+		Vector3 Normal{};
+		Vector3 Tangent{};
 	};
 
 	class Mesh {
@@ -91,7 +102,7 @@ namespace dae
 		Renderer& operator=(const Renderer&) = delete;
 		Renderer& operator=(Renderer&&) noexcept = delete;
 
-		void Update(const Timer* pTimer);
+		void Update(const Timer* pTimer, bool leftClick, bool rightClick);
 		void Render() const;
 
 	private:
@@ -110,6 +121,8 @@ namespace dae
 		ID3D11Texture2D* m_pRenderTargetBuffer{};
 		ID3D11RenderTargetView* m_pRenderTargetView{};
 
+		Camera m_Camera{};
+
 		Scene* m_pScene{};
 
 		int m_Width{};
@@ -119,8 +132,6 @@ namespace dae
 
 		//DIRECTX
 		HRESULT InitializeDirectX(RendererInitResult& value);
-
-#define _RELEASE(resource_ptr) if (resource_ptr != nullptr) { resource_ptr->Release(); resource_ptr = nullptr; }
 		//...
 	};
 }
