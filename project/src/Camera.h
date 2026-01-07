@@ -47,13 +47,13 @@ namespace dae
 			//forward = {0, 0, 1};
 			//pitchYawToVec(-totalYaw, -totalPitch, forward.x, forward.y, forward.z);
 			//Matrix rotation{ Matrix::CreateLookAtLH({0, 0, 0}, forward, {0, 1, 0}) };
-			Matrix rotation = Matrix::CreateRotation(totalPitch, totalYaw, 0.0f);
+			Matrix rotation = Matrix::CreateRotation(-totalPitch, totalYaw, 0.0f);
 			forward = rotation.TransformVector({ 0, 0, 1 });
-			right = Vector3::Cross({ 0, 1, 0 }, forward).Normalized();
+			right = Vector3::Cross(forward, { 0, 1, 0 }).Normalized();
 
 			Vector3 flipY = origin;
 
-			viewMatrix = (Matrix::CreateTranslation(flipY) * rotation).Inverse(); //*Matrix::CreateScale(1.0f, -1.0f, 1.0f);
+			viewMatrix = (rotation * Matrix::CreateTranslation(flipY)).Inverse(); //*Matrix::CreateScale(1.0f, -1.0f, 1.0f);
 		}
 
 		void CalculateProjectionMatrix()
@@ -86,7 +86,7 @@ namespace dae
 				const float input_Y = float(mouseY);
 
 				// Move (world) Up/Down (LMB + RMB + Mouse Move Y)
-				origin += (up * input_Y) * pTimer->GetElapsed();
+				origin += (up * input_Y) * pTimer->GetElapsed() * 50.0f;
 			}
 			else if (isLeftMouseButtonDown) {
 				const float input_Y = float(mouseY);
@@ -95,7 +95,7 @@ namespace dae
 				totalYaw += float(mouseX) * sensitivity;
 
 				// Move (local) Forward/Backward (LMB + Mouse Move Y)
-				origin += (forward * -input_Y) * pTimer->GetElapsed();
+				origin += (forward * -input_Y) * pTimer->GetElapsed() * 50.0f;
 			}
 			else if (isRightMouseButtonDown) {
 				// Rotate Yaw (RMB + Mouse Move X)
@@ -121,7 +121,7 @@ namespace dae
 				const float HORIZONTAL{(pKeyboardState[SDL_SCANCODE_D] || pKeyboardState[SDL_SCANCODE_RIGHT] ? 1.0f : 0.0f) + (pKeyboardState[SDL_SCANCODE_A] || pKeyboardState[SDL_SCANCODE_LEFT] ? -1.0f : 0.0f)};
 				const float UP_DOWN{(pKeyboardState[SDL_SCANCODE_SPACE] ? 1.0f : 0.0f) + (pKeyboardState[SDL_SCANCODE_C] ? -1.0f : 0.0f)};
 
-				origin += (forward * VERTICAL + up * UP_DOWN + right * HORIZONTAL) * pTimer->GetElapsed() * 5.0f;
+				origin += (forward * VERTICAL + up * UP_DOWN + right * HORIZONTAL) * pTimer->GetElapsed() * 50.0f;
 			}
 
 			CalculateViewMatrix();

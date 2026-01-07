@@ -7,6 +7,8 @@
 
 #include "Utils.h"
 
+#include "Texture.h"
+
 //Project includes
 #include "Renderer.h"
 
@@ -27,9 +29,12 @@ Renderer::Renderer(SDL_Window* pWindow) :
 		m_IsInitialized = true;
 		std::cout << "DirectX is initialized and ready!\n";
 
+		InitializeSamplerStates();
+
 		m_pScene = new Scene();
-		m_Camera.Initialize(45.f, { 0.0f, 0.0f, -10.0f });
+		m_Camera.Initialize(45.f, { 0.0f, 0.0f, -100.0f });
 		m_pScene->InitializeScene(m_pDevice);
+		m_pScene->GenerateMips(m_pDeviceContext);
 	}
 	else
 	{
@@ -42,6 +47,10 @@ Renderer::Renderer(SDL_Window* pWindow) :
 Renderer::~Renderer()
 {
 	delete m_pScene;
+
+	_RELEASE_DX11_PTR(m_pSamplerLinear)
+	_RELEASE_DX11_PTR(m_pSamplerPoint)
+	_RELEASE_DX11_PTR(m_pSamplerAntisotropic)
 
 	_RELEASE_DX11_PTR(m_pRenderTargetView)
 		
@@ -101,19 +110,27 @@ void Renderer::Render() const
 
 		Matrix projView = m_Camera.viewMatrix * m_Camera.projectionMatrix;
 
-		std::cout << std::endl;
+		//std::cout << std::endl;
 
-		for (size_t i = 0; i < 4; i++)
-		{
-			std::cout << "[ ";
-			for (size_t j = 0; j < 4; j++)
-			{
-				std::cout << projView[i][j] << ", ";
-			}
-			std::cout << " ] " << std::endl;
-		}
+		//for (size_t i = 0; i < 4; i++)
+		//{
+		//	std::cout << "[ ";
+		//	for (size_t j = 0; j < 4; j++)
+		//	{
+		//		std::cout << projView[i][j] << ", ";
+		//	}
+		//	std::cout << " ] " << std::endl;
+		//}
 
 		container.effect->SetWorldViewProj(projView);
+		container.effect->SetWorld(container.world);
+		container.effect->SetDiffuseMap(container.diffuseMap);
+		container.effect->SetNormalMap(container.normalMap);
+		container.effect->SetSpecularMap(container.specularMap);
+		container.effect->SetGlossMap(container.glossMap);
+		container.effect->SetCameraOrigin(m_Camera.origin);
+		container.effect->SetLightDirection(m_LightDirection);
+		container.effect->SetSamplerState(m_pSamplerAntisotropic);
 
 		D3DX11_TECHNIQUE_DESC techdesc{};
 		container.effect->GetTechnique()->GetDesc(&techdesc);
@@ -236,6 +253,41 @@ HRESULT Renderer::InitializeDirectX(RendererInitResult& value)
 	return S_OK;
 }
 
+void dae::Renderer::InitializeSamplerStates()
+{
+	D3D11_SAMPLER_DESC desc{};
+
+	desc.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
+	desc.AddressU = D3D11_TEXTURE_ADDRESS_WRAP;
+	desc.AddressV = D3D11_TEXTURE_ADDRESS_WRAP;
+	desc.AddressW = D3D11_TEXTURE_ADDRESS_WRAP;
+
+	HRESULT result = m_pDevice->CreateSamplerState(&desc, &m_pSamplerLinear);
+
+	if (FAILED(result)) {
+		std::cerr << "Failed to initialize linear sampler state.\n";
+		return;
+	}
+
+	desc.Filter = D3D11_FILTER_MIN_MAG_MIP_POINT;
+
+	result = m_pDevice->CreateSamplerState(&desc, &m_pSamplerPoint);
+
+	if (FAILED(result)) {
+		std::cerr << "Failed to initialize point sampler state.\n";
+		return;
+	}
+
+	desc.Filter = D3D11_FILTER_ANISOTROPIC;
+
+	result = m_pDevice->CreateSamplerState(&desc, &m_pSamplerAntisotropic);
+
+	if (FAILED(result)) {
+		std::cerr << "Failed to initialize antisotropic sampler state.\n";
+		return;
+	}
+}
+
 #pragma endregion Renderer
 
 #pragma region Effect
@@ -297,17 +349,17 @@ dae::Effect::Effect(ID3D11Device* pDevice, const std::wstring assetFile) : m_pEf
 
 		vertexDesc[2].SemanticName = "TEXCOORD";
 		vertexDesc[2].Format = DXGI_FORMAT_R32G32B32A32_FLOAT;
-		vertexDesc[2].AlignedByteOffset = 8;
+		vertexDesc[2].AlignedByteOffset = 24;
 		vertexDesc[2].InputSlotClass = D3D11_INPUT_PER_VERTEX_DATA;
 
 		vertexDesc[3].SemanticName = "NORMAL";
 		vertexDesc[3].Format = DXGI_FORMAT_R32G32B32A32_FLOAT;
-		vertexDesc[3].AlignedByteOffset = 12;
+		vertexDesc[3].AlignedByteOffset = 32;
 		vertexDesc[3].InputSlotClass = D3D11_INPUT_PER_VERTEX_DATA;
 
 		vertexDesc[4].SemanticName = "TANGENT";
 		vertexDesc[4].Format = DXGI_FORMAT_R32G32B32A32_FLOAT;
-		vertexDesc[4].AlignedByteOffset = 12;
+		vertexDesc[4].AlignedByteOffset = 44;
 		vertexDesc[4].InputSlotClass = D3D11_INPUT_PER_VERTEX_DATA;
 
 		// Input Layout
@@ -322,6 +374,54 @@ dae::Effect::Effect(ID3D11Device* pDevice, const std::wstring assetFile) : m_pEf
 
 		if (!m_pWorldViewProjection->IsValid()) {
 			std::wcout << "Missing gWorldViewProj from shader.\n";
+		}
+
+		m_pWorld = m_pEffect->GetVariableByName("gWorld")->AsMatrix();
+
+		if (!m_pWorld->IsValid()) {
+			std::wcout << "Missing gWorld from shader.\n";
+		}
+
+		m_pDiffuseMapVariable = m_pEffect->GetVariableByName("gDiffuseMap")->AsShaderResource();
+
+		if (!m_pDiffuseMapVariable->IsValid()) {
+			std::cerr << "Missing gDiffuseMap from shader.\n";
+		}
+
+		m_pSpecularMapVariable = m_pEffect->GetVariableByName("gSpecularMap")->AsShaderResource();
+
+		if (!m_pSpecularMapVariable->IsValid()) {
+			std::cerr << "Missing gSpecularMap from shader.\n";
+		}
+
+		m_pNormalMapVariable = m_pEffect->GetVariableByName("gNormalMap")->AsShaderResource();
+
+		if (!m_pNormalMapVariable->IsValid()) {
+			std::cerr << "Missing gNormalMap from shader.\n";
+		}
+
+		m_pGlossMapVariable = m_pEffect->GetVariableByName("gGlossMap")->AsShaderResource();
+
+		if (!m_pGlossMapVariable->IsValid()) {
+			std::cerr << "Missing gGlossMap from shader.\n";
+		}
+
+		m_pLightDirection = m_pEffect->GetVariableByName("gLightDirection")->AsVector();
+
+		if (!m_pLightDirection->IsValid()) {
+			std::cerr << "Missing gLightDirection from shader.\n";
+		}
+
+		m_pCameraOrigin = m_pEffect->GetVariableByName("gCameraOrigin")->AsVector();
+
+		if (!m_pLightDirection->IsValid()) {
+			std::cerr << "Missing gCameraOrigin from shader.\n";
+		}
+
+		m_pSamplerState = m_pEffect->GetVariableByName("gSamplerState")->AsSampler();
+
+		if (!m_pSamplerState->IsValid()) {
+			std::cerr << "Missing gSamplerState from shader.\n";
 		}
 	}
 }
@@ -339,16 +439,69 @@ void dae::Effect::SetWorldViewProj(const Matrix& m)
 		return;
 	if (!m_pWorldViewProjection->IsValid())
 		return;
-	//float values[16];
-
-	//for (int y{}, index{}; y < 4; y++) {
-	//	for (int x = 0; x < 4; x++, index++)
-	//	{
-	//		values[index] = m[y][x];
-	//	}
-	//}
 
 	m_pWorldViewProjection->SetMatrix((float*)&m);
+}
+
+void dae::Effect::SetWorld(const Matrix& m)
+{
+	if (m_pWorld == nullptr)
+		return;
+	if (!m_pWorld->IsValid())
+		return;
+
+	m_pWorld->SetMatrix((float*)&m);
+}
+
+void dae::Effect::SetDiffuseMap(const Texture* diffuse)
+{
+	if (!diffuse)
+		return;
+	if (m_pDiffuseMapVariable)
+		m_pDiffuseMapVariable->SetResource(diffuse->GetSRV());
+}
+
+void dae::Effect::SetSpecularMap(const Texture* diffuse)
+{
+	if (!diffuse)
+		return;
+	if (m_pSpecularMapVariable)
+		m_pSpecularMapVariable->SetResource(diffuse->GetSRV());
+}
+
+void dae::Effect::SetNormalMap(const Texture* diffuse)
+{
+	if (!diffuse)
+		return;
+	if (m_pNormalMapVariable)
+		m_pNormalMapVariable->SetResource(diffuse->GetSRV());
+}
+
+void dae::Effect::SetGlossMap(const Texture* diffuse)
+{
+	if (!diffuse)
+		return;
+	if (m_pGlossMapVariable)
+		m_pGlossMapVariable->SetResource(diffuse->GetSRV());
+}
+
+void dae::Effect::SetCameraOrigin(const Vector3& v)
+{
+	if (m_pCameraOrigin)
+		m_pCameraOrigin->SetFloatVector((float*) & v);
+}
+
+void dae::Effect::SetLightDirection(const Vector3& v)
+{
+	if (m_pLightDirection)
+		m_pLightDirection->SetFloatVector((float*)&v);
+}
+
+void dae::Effect::SetSamplerState(ID3D11SamplerState* v)
+{
+	if (m_pSamplerState && m_pSamplerState->IsValid()) {
+		m_pSamplerState->SetSampler(0, v);
+	}
 }
 
 #pragma endregion Effect
@@ -412,6 +565,11 @@ void dae::Scene::AddContainer(Container& container)
 	m_Containers.emplace_back(container);
 }
 
+void dae::Scene::AddTexture(Texture* texture)
+{
+	m_Textures.emplace_back(texture);
+}
+
 dae::Scene::Scene()
 {
 
@@ -427,6 +585,10 @@ dae::Scene::~Scene()
 	for (Effect* effect : m_Effects) {
 		delete effect;
 	}
+
+	for (Texture* texture : m_Textures) {
+		delete texture;
+	}
 	m_Effects.clear();
 }
 
@@ -434,6 +596,7 @@ void dae::Scene::InitializeScene(ID3D11Device* pDevice)
 {
 	Mesh* helloTriangle;
 	Mesh* vehicle;
+	Mesh* fireFX;
 
 	{
 		std::vector<dae::Vertex> vertices{
@@ -455,19 +618,72 @@ void dae::Scene::InitializeScene(ID3D11Device* pDevice)
 		vehicle = new Mesh(pDevice, vertices, indices);
 	}
 
+	{
+		std::vector<dae::Vertex> vertices{};
+		std::vector<uint32_t> indices{};
+
+		if (Utils::ParseOBJ("./resources/fireFX.obj", vertices, indices)) {
+			std::cout << "Parsed firefx obj" << std::endl;
+		}
+		fireFX = new Mesh(pDevice, vertices, indices);
+	}
+
 	AddMesh(helloTriangle);
 	AddMesh(vehicle);
+	AddMesh(fireFX);
+
+	Texture* vehicle_Diffuse = new Texture(pDevice, "./resources/vehicle_diffuse.png");
+	Texture* vehicle_Specular = new Texture(pDevice, "./resources/vehicle_specular.png");
+	Texture* vehicle_Gloss = new Texture(pDevice, "./resources/vehicle_gloss.png");
+	Texture* vehicle_Normal = new Texture(pDevice, "./resources/vehicle_normal.png");
+
+	Texture* fireFx_Diffuse = new Texture(pDevice, "./resources/fireFX_diffuse.png");
+
+	AddTexture(vehicle_Diffuse);
+	AddTexture(vehicle_Specular);
+	AddTexture(vehicle_Gloss);
+	AddTexture(vehicle_Normal);
+
+	AddTexture(fireFx_Diffuse);
 
 	Effect* posColEffect = new dae::Effect(pDevice, L"./resources/PosCol3D.fx");
+	Effect* fireFX_Effect = new dae::Effect(pDevice, L"./resources/fireFX_Effect.fx");
 
 	AddEffect(posColEffect);
+	AddEffect(fireFX_Effect);
 
-	Container container{};
+	{
+		Container container{};
 
-	container.effect = posColEffect;
-	container.mesh = vehicle;
+		container.effect = posColEffect;
+		container.mesh = vehicle;
+		container.diffuseMap = vehicle_Diffuse;
+		container.normalMap = vehicle_Normal;
+		container.glossMap = vehicle_Gloss;
+		container.specularMap = vehicle_Specular;
 
-	AddContainer(container);
+		AddContainer(container);
+	}
+
+	{
+		Container container{};
+
+		container.effect = fireFX_Effect;
+		container.mesh = fireFX;
+		container.diffuseMap = fireFx_Diffuse;
+		container.normalMap = vehicle_Normal;
+		container.glossMap = vehicle_Gloss;
+		container.specularMap = vehicle_Specular;
+
+		AddContainer(container);
+	}
+}
+
+void dae::Scene::GenerateMips(ID3D11DeviceContext* pDeviceContext)
+{
+	for (Texture* texture : m_Textures) {
+		pDeviceContext->GenerateMips(texture->GetSRV());
+	}
 }
 
 #pragma endregion Scene
