@@ -60,6 +60,13 @@ int main(int argc, char* args[])
 	bool isLooping = true;
 
 	bool lmb{0}, rmb{ 0 };
+
+
+	bool useSoftwareRasterizer = false;
+
+	bool printFPS{ 0 };
+
+	Scene* scene = pRenderer->GetScene();
 	
 	while (isLooping)
 	{
@@ -74,7 +81,89 @@ int main(int argc, char* args[])
 				break;
 			case SDL_KEYUP:
 				//Test for a key
-				//if (e.key.keysym.scancode == SDL_SCANCODE_X)
+				if (e.key.keysym.scancode == SDL_SCANCODE_F1) {
+					useSoftwareRasterizer = !useSoftwareRasterizer;
+					std::cout << (useSoftwareRasterizer ? "Using software rasterizer" : "Using hardware rasterizer") << std::endl;
+				}
+				else if (e.key.keysym.scancode == SDL_SCANCODE_F2) {
+					scene->renderSettings.hasRotation = !scene->renderSettings.hasRotation;
+					std::cout << "Rotateion: " << scene->renderSettings.hasRotation << std::endl;
+				}
+				else if (e.key.keysym.scancode == SDL_SCANCODE_F3) {
+					scene->renderSettings.drawFireFx = !scene->renderSettings.drawFireFx;
+					std::cout << "FireFX: " << scene->renderSettings.drawFireFx << std::endl;
+				}
+				else if (e.key.keysym.scancode == SDL_SCANCODE_F4) {
+					scene->renderSettings.samplingState = soft::RenderSettings::SamplingState((int(scene->renderSettings.samplingState) + 1) % 3);
+
+					std::cout << "Current sampling state: ";
+					switch (scene->renderSettings.samplingState) {
+					case soft::RenderSettings::Point:
+						std::cout << "Point\n";
+						break;
+					case soft::RenderSettings::Linear:
+						std::cout << "Linear\n";
+						break;
+					case soft::RenderSettings::Anisotropic:
+						std::cout << "Anisotropic\n";
+						break;
+					}
+				}
+				else if (e.key.keysym.scancode == SDL_SCANCODE_F5) {
+					scene->renderSettings.shadingMode = soft::RenderSettings::ShadingMode((int(scene->renderSettings.shadingMode) + 1) % 4);
+
+					std::cout << "Current shading mode: ";
+					switch (scene->renderSettings.shadingMode) {
+					case soft::RenderSettings::Combined:
+						std::cout << "Combined\n";
+						break;
+					case soft::RenderSettings::Diffuse:
+						std::cout << "Diffuse\n";
+						break;
+					case soft::RenderSettings::ObservedArea:
+						std::cout << "ObservableArea\n";
+						break;
+					case soft::RenderSettings::Specular:
+						std::cout << "Specular\n";
+						break;
+					}
+				}
+				else if (e.key.keysym.scancode == SDL_SCANCODE_F6) {
+					scene->renderSettings.useNormalMap = !scene->renderSettings.useNormalMap;
+					std::cout << "Use Normal Map: " << scene->renderSettings.useNormalMap << std::endl;
+				}
+				else if (e.key.keysym.scancode == SDL_SCANCODE_F7) {
+					scene->renderSettings.visualizeDepth = !scene->renderSettings.visualizeDepth;
+					std::cout << "Depth visualizer: " << scene->renderSettings.visualizeDepth << std::endl;
+				}
+				else if (e.key.keysym.scancode == SDL_SCANCODE_F8) {
+					scene->renderSettings.showTriangleBounds = !scene->renderSettings.showTriangleBounds;
+					std::cout << "Triangle bounds visualizer: " << scene->renderSettings.showTriangleBounds << std::endl;
+				}
+				else if (e.key.keysym.scancode == SDL_SCANCODE_F9) {
+					scene->renderSettings.cullMode = soft::RenderSettings::CullMode((int(scene->renderSettings.cullMode) + 1) % 3);
+
+					std::cout << "Current cull mode: ";
+					switch (scene->renderSettings.cullMode) {
+					case soft::RenderSettings::Front:
+						std::cout << "Front\n";
+						break;
+					case soft::RenderSettings::Back:
+						std::cout << "Back\n";
+						break;
+					case soft::RenderSettings::None:
+						std::cout << "None\n";
+						break;
+					}
+				}
+				else if (e.key.keysym.scancode == SDL_SCANCODE_F10) {
+					scene->renderSettings.useUniformClearColor = !scene->renderSettings.useUniformClearColor;
+					std::cout << "Uniform clear color: " << scene->renderSettings.useUniformClearColor << std::endl;
+				}
+				else if (e.key.keysym.scancode == SDL_SCANCODE_F11) {
+					printFPS = !printFPS;
+					std::cout << "Printing fps: " << printFPS << std::endl;
+				}
 				break;
 			case SDL_MOUSEBUTTONUP:
 				if (e.button.button == SDL_BUTTON_LEFT)
@@ -98,10 +187,13 @@ int main(int argc, char* args[])
 		SDL_SetRelativeMouseMode(lmb || rmb ? SDL_TRUE : SDL_FALSE);
 
 		//--------- Update ---------
-		pRenderer->Update(pTimer, lmb, rmb);
+		pRenderer->Update(pTimer, lmb, rmb, useSoftwareRasterizer);
 
 		//--------- Render ---------
-		pRenderer->Render();
+		if (useSoftwareRasterizer)
+			pRenderer->RenderSoftwareRasterizer();
+		else
+			pRenderer->Render();
 
 		//--------- Timer ---------
 		pTimer->Update();
@@ -109,7 +201,8 @@ int main(int argc, char* args[])
 		if (printTimer >= 1.f)
 		{
 			printTimer = 0.f;
-			std::cout << "dFPS: " << pTimer->GetdFPS() << std::endl;
+			if (printFPS)
+				std::cout << "dFPS: " << pTimer->GetdFPS() << std::endl;
 		}
 	}
 	pTimer->Stop();

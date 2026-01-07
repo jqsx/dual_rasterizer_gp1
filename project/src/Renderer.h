@@ -20,6 +20,11 @@
 
 #include "Camera.h"
 #include "Matrix.h"
+#include <string>
+
+#include "DataTypes.h"
+
+#include <vector>
 
 namespace dae
 {
@@ -42,6 +47,7 @@ namespace dae
 		ID3DX11EffectShaderResourceVariable* m_pGlossMapVariable;
 
 		ID3DX11EffectSamplerVariable* m_pSamplerState;
+		ID3DX11EffectRasterizerVariable* m_pRasterizerState;
 
 		static ID3DX11Effect* LoadEffect(ID3D11Device* pDevice, const std::wstring assetFile);
 
@@ -61,14 +67,7 @@ namespace dae
 		void SetCameraOrigin(const Vector3& v);
 		void SetLightDirection(const Vector3& v);
 		void SetSamplerState(ID3D11SamplerState* v);
-	};
-
-	struct Vertex {
-		Vector3 Position;
-		ColorRGB Color;
-		Vector2 Uv{};
-		Vector3 Normal{};
-		Vector3 Tangent{};
+		void SetRasterizerState(ID3D11RasterizerState* v);
 	};
 
 	class Mesh {
@@ -76,6 +75,9 @@ namespace dae
 		ID3D11Buffer* m_pIndexBuffer;
 
 		uint32_t m_NumIndices;
+
+		std::vector<Vertex> m_Vertices;
+		std::vector<unsigned int> m_Indices;
 	public:
 		explicit Mesh(ID3D11Device* pDevice, const std::vector<Vertex>& vertices, const std::vector<unsigned int>& indices);
 		~Mesh();
@@ -83,6 +85,9 @@ namespace dae
 		ID3D11Buffer* GetVertexBuffer() const { return m_pVertexBuffer; }
 		ID3D11Buffer* GetIndexBuffer() const { return m_pIndexBuffer; }
 		uint32_t GetNumIndices() const { return m_NumIndices; }
+
+		const std::vector<Vertex>& GetVertices() const { return m_Vertices; }
+		const std::vector<unsigned int>& GetIndices() const { return m_Indices; }
 	};
 
 	struct Container {
@@ -92,7 +97,9 @@ namespace dae
 		Texture* specularMap;
 		Texture* normalMap;
 		Texture* glossMap;
+		soft::PrimitiveTopology topology{ soft::PrimitiveTopology::TriangleList };
 		Matrix world{ Matrix::CreateIdentity() };
+		bool isFlame{ 0 };
 	};
 
 	class Scene {
@@ -110,11 +117,14 @@ namespace dae
 		Scene();
 		~Scene();
 
+		soft::RenderSettings renderSettings{};
+
 		void InitializeScene(ID3D11Device* pDevice);
 
 		void GenerateMips(ID3D11DeviceContext* pDeviceContext);
 
-		const std::vector<Container>& GetContainers() const { return m_Containers; };
+		const std::vector<Container>& GetContainers() const;
+		std::vector<Container>& GetContainersM();
 	};
 
 	struct RendererInitResult {
@@ -132,11 +142,29 @@ namespace dae
 		Renderer& operator=(const Renderer&) = delete;
 		Renderer& operator=(Renderer&&) noexcept = delete;
 
-		void Update(const Timer* pTimer, bool leftClick, bool rightClick);
+		void Update(const Timer* pTimer, bool leftClick, bool rightClick, bool useSoftwareRasterizer);
 		void Render() const;
+
+		void RenderSoftwareRasterizer();
+
+		Scene* GetScene() const { return m_pScene; }
 
 	private:
 		SDL_Window* m_pWindow{};
+
+		SDL_Surface* m_pFrontBuffer{ nullptr };
+		SDL_Surface* m_pBackBuffer{ nullptr };
+		uint32_t* m_pBackBufferPixels{};
+
+		float* m_pDepthBufferPixels{};
+
+		Vector2 m_Min{};
+		Vector2 m_Max{};
+
+		int m_Width{};
+		int m_Height{};
+
+		Int_AABB m_ScreenBounds{ {0, 0}, {0, 0} };
 
 		ID3D11Device* m_pDevice;
 		ID3D11DeviceContext* m_pDeviceContext;
@@ -155,14 +183,19 @@ namespace dae
 		ID3D11SamplerState* m_pSamplerLinear;
 		ID3D11SamplerState* m_pSamplerAntisotropic;
 
+		ID3D11RasterizerState* m_pCullFront;
+		ID3D11RasterizerState* m_pCullBack;
+		ID3D11RasterizerState* m_pCullNone;
+
 		Camera m_Camera{};
+
+		const float clearColor[4] = { 0.1f, 0.1f, 0.1f, 1.0f };
+		const float clearColorHardware[4] = { 0.39f, 0.59f, 0.93f, 1.0f };
+		const ColorRGB clearColorSoftware{ 0.39f, 0.39f, 0.39f };
 
 		Scene* m_pScene{};
 
-		Vector3 m_LightDirection{ Vector3(0.577f,0.577f ,0.577f).Normalized() };
-
-		int m_Width{};
-		int m_Height{};
+		Vector3 m_LightDirection{ Vector3(0.577f,-0.577f ,0.577f).Normalized() };
 
 		bool m_IsInitialized{ false };
 
@@ -170,5 +203,48 @@ namespace dae
 		HRESULT InitializeDirectX(RendererInitResult& value);
 		void InitializeSamplerStates();
 		//...
+
+		// Software rasterizer
+
+		void VertexTransformationFunction(const Matrix& objectToWorld, const Matrix& modelViewProjection, const std::vector<Vertex>& vertices_in, std::vector<soft::Vertex_Out>& vertices_out) const;
+		void VertexInformation(const Matrix& objectTOWorld, const Matrix& modelViewProjection, const Vertex& IN, soft::Vertex_Out& OUT) const;
+		void DrawTriangle(const soft::Triangle& triangle, const Container& container);
+
+		bool PixelShading(ColorRGB& fragColor, const soft::VS_OUT& in, float& alpha, bool isFlame) const;
+
+		bool isPixelInTriangle(const Vector2& c0, const Vector2& c1, const Vector2& c2, const Vector2& pixel, bool isFlame, bool& isBackFace);
+		Vector2 NormlPixelToScreen(const Vector2& normlPixel) const;
+
+		static Vector2 center(int x, int y);
+		void ClearBuffers() const;
+
+		static Vector3 GetBarycentricCoord(const Vector2& c0, const Vector2& c1, const Vector2& c2, const Vector2& pixel);
+
+		static Vector2 v_max(const Vector2& v1, const Vector2& v2, const Vector2& v3);
+
+		static Vector2 v_min(const Vector2& v1, const Vector2& v2, const Vector2& v3);
+
+		static Vector2 v_Clamp(const Vector2& v, const Vector2& min, const Vector2& max);
+
+		static bool isClose(const Vector2& v0, const Vector2& p, float distance);
+
+		static void MinMaxAABB(const soft::Triangle& screenSpace, Vector2& max, Vector2& min);
+
+		Vector2 VectorRangeToPixelCoord(const Vector2& v) const;
+
+		static Vector2 Ceil(const Vector2& v);
+
+		static Vector2 Floor(const Vector2& v);
+		Vector2 PixelCoordToScreenCoord(const Vector2& v) const;
+		
+		float GetObservableArea(const Vector3& normal) const;
+
+		static ColorRGB GetLambertColor(const ColorRGB& cd, float kd);
+
+		static Matrix GetTangentSpaceAxis(const Vector3& tangent, const Vector3& normal);
+
+		static float Phong(const Vector3& l, const Vector3& n, const Vector3& v, float ks, float e);
+
+		static Int2 vToi(const Vector2& v);
 	};
 }

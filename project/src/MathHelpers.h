@@ -3,6 +3,8 @@
 #include <cfloat>
 #include <algorithm>
 
+#include "ColorRGB.h"
+
 namespace dae
 {
 	/* --- HELPER STRUCTS --- */
@@ -10,6 +12,11 @@ namespace dae
 	{
 		int x{};
 		int y{};
+	};
+
+	struct Int_AABB {
+		Int2 corner;
+		Int2 size;
 	};
 
 	/* --- CONSTANTS --- */
@@ -23,6 +30,14 @@ namespace dae
 	constexpr auto TO_RADIANS(PI / 180.0f);
 
 	/* --- HELPER FUNCTIONS --- */
+
+	inline bool isIntersect(const Int_AABB& b0, const Int_AABB& b1) {
+		bool x = b0.corner.x > b1.corner.x - b0.size.x && b0.corner.x < b1.corner.x + b1.size.x;
+		bool y = b0.corner.y > b1.corner.y - b0.size.y && b0.corner.y < b1.corner.y + b1.size.y;
+
+		return x && y;
+	}
+
 	inline float Square(float a)
 	{
 		return a * a;

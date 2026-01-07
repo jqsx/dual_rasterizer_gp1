@@ -18,7 +18,9 @@ struct VS_OUTPUT
     float3 Tangent : TANGENT;
 };
 
-RasterizerState gRasterizerState
+RasterizerState gRasterizerState : CullMode;
+
+RasterizerState _gRasterizerState
 {
     CullMode = back;
     FrontCounterClockwise = false;
@@ -91,7 +93,7 @@ technique11 DefaultTechnique
 {
     pass P0
     {
-        SetRasterizerState(gRasterizerState);
+        SetRasterizerState(_gRasterizerState);
         SetDepthStencilState(gDepthStencilState, 0);
         SetBlendState(gBlendState, float4(0.0f, 0.0f, 0.0f, 0.0f), 0xFFFFFFFF);
         SetVertexShader(CompileShader(vs_5_0, VS()));

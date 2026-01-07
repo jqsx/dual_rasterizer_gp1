@@ -11,6 +11,7 @@
 
 //Project includes
 #include "Renderer.h"
+#include "DataTypes.h"
 
 using namespace dae;
 
@@ -28,6 +29,12 @@ Renderer::Renderer(SDL_Window* pWindow) :
 	{
 		m_IsInitialized = true;
 		std::cout << "DirectX is initialized and ready!\n";
+
+		m_pFrontBuffer = SDL_GetWindowSurface(pWindow);
+		m_pBackBuffer = SDL_CreateRGBSurface(0, m_Width, m_Height, 32, 0, 0, 0, 0);
+		m_pBackBufferPixels = (uint32_t*)m_pBackBuffer->pixels;
+
+		m_pDepthBufferPixels = new float[m_Width * m_Height];
 
 		InitializeSamplerStates();
 
@@ -47,6 +54,9 @@ Renderer::Renderer(SDL_Window* pWindow) :
 Renderer::~Renderer()
 {
 	delete m_pScene;
+
+	SDL_FreeSurface(m_pBackBuffer);
+	delete[] m_pDepthBufferPixels;
 
 	_RELEASE_DX11_PTR(m_pSamplerLinear)
 	_RELEASE_DX11_PTR(m_pSamplerPoint)
@@ -69,10 +79,18 @@ Renderer::~Renderer()
 	_RELEASE_DX11_PTR(m_pDxgiFactory)
 }
 
-void Renderer::Update(const Timer* pTimer, bool leftClick, bool rightClick)
+void Renderer::Update(const Timer* pTimer, bool leftClick, bool rightClick, bool useSoftwareRasterizer)
 {
 	m_Camera.aspect = float(m_Width) / float(m_Height);
-	m_Camera.Update(pTimer, leftClick, rightClick);
+	m_Camera.Update(pTimer, leftClick, rightClick, useSoftwareRasterizer);
+
+	if (m_pScene->renderSettings.hasRotation)
+	{
+		const Matrix worldMatrix = Matrix::CreateRotation(0.0f, pTimer->GetTotal() * M_PI / 4.0f, 0.0f) * Matrix::CreateTranslation({ 0.0f, 0.0f, 50.0f });
+		for (Container& container : m_pScene->GetContainersM()) {
+			container.world = worldMatrix;
+		}
+	}
 }
 
 
@@ -81,11 +99,9 @@ void Renderer::Render() const
 	if (!m_IsInitialized)
 		return;
 
-	const float clearColor[4] = { 0.1f, 0.1f, 0.3f, 1.0f };
-
 	m_pDeviceContext->ClearRenderTargetView(
 		m_pRenderTargetView,
-		clearColor
+		m_pScene->renderSettings.useUniformClearColor ? clearColor : clearColorHardware
 	);
 
 	m_pDeviceContext->ClearDepthStencilView(
@@ -98,6 +114,8 @@ void Renderer::Render() const
 	m_pDeviceContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
 	for (const Container& container : m_pScene->GetContainers()) {
+		if (container.isFlame && !m_pScene->renderSettings.drawFireFx)
+			continue;
 		m_pDeviceContext->IASetInputLayout(container.effect->GetInputLayout());
 
 		constexpr UINT stride = sizeof(Vertex);
@@ -108,7 +126,7 @@ void Renderer::Render() const
 		m_pDeviceContext->IASetVertexBuffers(0, 1, &vertex_buffer, &stride, &offset);
 		m_pDeviceContext->IASetIndexBuffer(container.mesh->GetIndexBuffer(), DXGI_FORMAT_R32_UINT, 0);
 
-		Matrix projView = m_Camera.viewMatrix * m_Camera.projectionMatrix;
+		Matrix projView = container.world * m_Camera.viewMatrix * m_Camera.projectionMatrix;
 
 		//std::cout << std::endl;
 
@@ -130,7 +148,28 @@ void Renderer::Render() const
 		container.effect->SetGlossMap(container.glossMap);
 		container.effect->SetCameraOrigin(m_Camera.origin);
 		container.effect->SetLightDirection(m_LightDirection);
-		container.effect->SetSamplerState(m_pSamplerAntisotropic);
+		switch (m_pScene->renderSettings.samplingState) {
+			case soft::RenderSettings::SamplingState::Point:
+				container.effect->SetSamplerState(m_pSamplerPoint);
+				break;
+			case soft::RenderSettings::SamplingState::Linear:
+				container.effect->SetSamplerState(m_pSamplerLinear);
+				break;
+			case soft::RenderSettings::SamplingState::Anisotropic:
+				container.effect->SetSamplerState(m_pSamplerAntisotropic);
+				break;
+		}
+		switch (m_pScene->renderSettings.cullMode) {
+			case soft::RenderSettings::Back:
+				container.effect->SetRasterizerState(m_pCullBack);
+				break;
+			case soft::RenderSettings::Front:
+				container.effect->SetRasterizerState(m_pCullFront);
+				break;
+			case soft::RenderSettings::None:
+				container.effect->SetRasterizerState(m_pCullNone);
+				break;
+		}
 
 		D3DX11_TECHNIQUE_DESC techdesc{};
 		container.effect->GetTechnique()->GetDesc(&techdesc);
@@ -141,6 +180,60 @@ void Renderer::Render() const
 	}
 
 	m_pDxgiSwapChain->Present(0, 0);
+}
+
+void dae::Renderer::RenderSoftwareRasterizer()
+{
+	SDL_LockSurface(m_pBackBuffer);
+
+	m_ScreenBounds.size.x = m_Width;
+	m_ScreenBounds.size.y = m_Height;
+
+	m_Camera.aspect = float(m_Width) / float(m_Height);
+
+	ClearBuffers();
+
+	soft::Triangle triangle;
+
+	std::vector<soft::Vertex_Out> transformedVertices{};
+
+	for (const Container& container : m_pScene->GetContainers()) {
+		const Matrix flipYWorld = container.world * Matrix::CreateScale({ 1.0f, -1.0f, 1.0f });
+		const Matrix viewMatrix = m_Camera.viewMatrix;
+		const Matrix modelViewProjection = flipYWorld * viewMatrix * m_Camera.projectionMatrix;
+
+		// Function transforms object space (relative space) directly to screen space and NDC. This is done for every vertex and buffered into the transformedVertices vector
+		VertexTransformationFunction(flipYWorld, modelViewProjection, container.mesh->GetVertices(), transformedVertices);
+
+		const std::vector<unsigned int> indices = container.mesh->GetIndices();
+
+		for (int index = 0; index < container.mesh->GetIndices().size() - (container.topology == soft::PrimitiveTopology::TriangleStrip ? 2 : 0); index += (container.topology == soft::PrimitiveTopology::TriangleList ? 3 : 1)) {
+			unsigned int i0 = indices[index + 0];
+			unsigned int i1 = indices[index + 1];
+			unsigned int i2 = indices[index + 2];
+
+			if (i0 == i1 || i2 == i0 || i1 == i2) {
+				return;
+			}
+
+			triangle.v0 = transformedVertices[i0];
+			triangle.v1 = transformedVertices[i1];
+			triangle.v2 = transformedVertices[i2];
+
+			if (triangle.v0.position.w <= 0 && triangle.v1.position.w <= 0 && triangle.v2.position.w <= 0)
+				continue;
+
+			DrawTriangle(triangle, container);
+		}
+	}
+
+	//RENDER LOGIC
+
+	//@END
+	//Update SDL Surface
+	SDL_UnlockSurface(m_pBackBuffer);
+	SDL_BlitSurface(m_pBackBuffer, nullptr, m_pFrontBuffer, nullptr);
+	SDL_UpdateWindowSurface(m_pWindow);
 }
 
 HRESULT Renderer::InitializeDirectX(RendererInitResult& value)
@@ -255,36 +348,80 @@ HRESULT Renderer::InitializeDirectX(RendererInitResult& value)
 
 void dae::Renderer::InitializeSamplerStates()
 {
-	D3D11_SAMPLER_DESC desc{};
+	{
+		D3D11_SAMPLER_DESC desc{};
 
-	desc.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
-	desc.AddressU = D3D11_TEXTURE_ADDRESS_WRAP;
-	desc.AddressV = D3D11_TEXTURE_ADDRESS_WRAP;
-	desc.AddressW = D3D11_TEXTURE_ADDRESS_WRAP;
+		desc.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
+		desc.AddressU = D3D11_TEXTURE_ADDRESS_WRAP;
+		desc.AddressV = D3D11_TEXTURE_ADDRESS_WRAP;
+		desc.AddressW = D3D11_TEXTURE_ADDRESS_WRAP;
 
-	HRESULT result = m_pDevice->CreateSamplerState(&desc, &m_pSamplerLinear);
+		HRESULT result = m_pDevice->CreateSamplerState(&desc, &m_pSamplerLinear);
 
-	if (FAILED(result)) {
-		std::cerr << "Failed to initialize linear sampler state.\n";
-		return;
+		if (FAILED(result)) {
+			std::cerr << "Failed to initialize linear sampler state.\n";
+			return;
+		}
+
+		desc.Filter = D3D11_FILTER_MIN_MAG_MIP_POINT;
+
+		result = m_pDevice->CreateSamplerState(&desc, &m_pSamplerPoint);
+
+		if (FAILED(result)) {
+			std::cerr << "Failed to initialize point sampler state.\n";
+			return;
+		}
+
+		desc.Filter = D3D11_FILTER_ANISOTROPIC;
+
+		result = m_pDevice->CreateSamplerState(&desc, &m_pSamplerAntisotropic);
+
+		if (FAILED(result)) {
+			std::cerr << "Failed to initialize antisotropic sampler state.\n";
+			return;
+		}
 	}
 
-	desc.Filter = D3D11_FILTER_MIN_MAG_MIP_POINT;
+	{
+		D3D11_RASTERIZER_DESC desc{};
 
-	result = m_pDevice->CreateSamplerState(&desc, &m_pSamplerPoint);
+		desc.CullMode = D3D11_CULL_FRONT;
+		desc.FrontCounterClockwise = false;
+		desc.FillMode = D3D11_FILL_SOLID;
+		desc.DepthBias = 0;
+		desc.DepthBiasClamp = 0.0f;
+		desc.SlopeScaledDepthBias = 0.0f;
+		desc.DepthClipEnable = true;
+		desc.ScissorEnable = false;
+		desc.MultisampleEnable = false;
+		desc.AntialiasedLineEnable = false;
 
-	if (FAILED(result)) {
-		std::cerr << "Failed to initialize point sampler state.\n";
-		return;
-	}
+		HRESULT result = m_pDevice->CreateRasterizerState(&desc, &m_pCullFront);
 
-	desc.Filter = D3D11_FILTER_ANISOTROPIC;
+		if (FAILED(result)) {
+			std::cerr << "Failed to initialize front face culling rasterizer state.\n";
+			return;
+		}
 
-	result = m_pDevice->CreateSamplerState(&desc, &m_pSamplerAntisotropic);
+		desc.CullMode = D3D11_CULL_BACK;
+		desc.FrontCounterClockwise = false;
 
-	if (FAILED(result)) {
-		std::cerr << "Failed to initialize antisotropic sampler state.\n";
-		return;
+		result = m_pDevice->CreateRasterizerState(&desc, &m_pCullBack);
+
+		if (FAILED(result)) {
+			std::cerr << "Failed to initialize back face culling rasterizer state.\n";
+			return;
+		}
+
+		desc.CullMode = D3D11_CULL_NONE;
+		desc.FrontCounterClockwise = false;
+
+		result = m_pDevice->CreateRasterizerState(&desc, &m_pCullNone);
+
+		if (FAILED(result)) {
+			std::cerr << "Failed to initialize none face culling rasterizer state.\n";
+			return;
+		}
 	}
 }
 
@@ -423,6 +560,12 @@ dae::Effect::Effect(ID3D11Device* pDevice, const std::wstring assetFile) : m_pEf
 		if (!m_pSamplerState->IsValid()) {
 			std::cerr << "Missing gSamplerState from shader.\n";
 		}
+
+		m_pRasterizerState = m_pEffect->GetVariableByName("gRasterizerState")->AsRasterizer();
+
+		if (!m_pRasterizerState->IsValid()) {
+			std::cerr << "Missing gRasterizerState from shader.\n";
+		}
 	}
 }
 
@@ -504,11 +647,19 @@ void dae::Effect::SetSamplerState(ID3D11SamplerState* v)
 	}
 }
 
+void dae::Effect::SetRasterizerState(ID3D11RasterizerState* v)
+{
+	if (m_pRasterizerState && m_pRasterizerState->IsValid())
+		m_pRasterizerState->SetRasterizerState(0, v);
+}
+
 #pragma endregion Effect
 
 #pragma region Mesh
 dae::Mesh::Mesh(ID3D11Device* pDevice, const std::vector<Vertex>& vertices, const std::vector<unsigned int>& indices) : m_NumIndices{ 0 }, m_pIndexBuffer{ nullptr }, m_pVertexBuffer{ nullptr }
 {
+	m_Vertices = vertices;
+	m_Indices = indices;
 	D3D11_BUFFER_DESC bd = {};
 	bd.Usage = D3D11_USAGE_IMMUTABLE;
 	bd.ByteWidth = sizeof(Vertex) * static_cast<uint32_t>(vertices.size());
@@ -674,6 +825,7 @@ void dae::Scene::InitializeScene(ID3D11Device* pDevice)
 		container.normalMap = vehicle_Normal;
 		container.glossMap = vehicle_Gloss;
 		container.specularMap = vehicle_Specular;
+		container.isFlame = true;
 
 		AddContainer(container);
 	}
@@ -686,4 +838,335 @@ void dae::Scene::GenerateMips(ID3D11DeviceContext* pDeviceContext)
 	}
 }
 
+const std::vector<Container>& dae::Scene::GetContainers() const
+{
+	return m_Containers;
+}
+
+std::vector<Container>& dae::Scene::GetContainersM()
+{
+	return m_Containers;
+}
+
 #pragma endregion Scene
+
+#pragma region Software Rasterizer Functions
+
+void Renderer::VertexTransformationFunction(const Matrix& objectToWorld, const Matrix& modelViewProjection, const std::vector<Vertex>& vertices_in, std::vector<soft::Vertex_Out>& vertices_out) const {
+	// Resizes, but doesn't change capacity so the vector only scales up the capacity if necessary
+	if (vertices_out.size() != vertices_in.size())
+		vertices_out.resize(vertices_in.size());
+
+	for (int index = 0; index < vertices_in.size(); ++index) {
+		VertexInformation(objectToWorld, modelViewProjection, vertices_in[index], vertices_out[index]);
+	}
+}
+
+void Renderer::VertexInformation(const Matrix& objectToWorld, const Matrix& modelViewProjection, const Vertex& vin, soft::Vertex_Out& vout) const {
+	vout = vin;
+
+	const Vector4 position = modelViewProjection.TransformPoint(Vector4(vin.Position, 1.0f));
+
+	// Use only rotation and scale.
+	vout.normal = objectToWorld.TransformVector(vin.Normal);
+	vout.tangent = objectToWorld.TransformVector(vin.Tangent);
+
+	vout.normal.y *= -1.0f;
+	vout.tangent.y *= -1.0f;
+
+	vout.worldPosition = objectToWorld.TransformPoint(position);
+
+	vout.viewDirection = (vout.worldPosition - m_Camera.origin).Normalized();
+
+	if (position.w == 0.0f) { // Avoid dividing by 0 just in case
+		vout.xyNorm = { 0.0f, 0.0f };
+	}
+	else {
+		const float z = position.z / position.w;
+
+		if (z != 0.0f)
+			vout.xyNorm = { position.x / position.w, position.y / position.w };
+		else
+			vout.xyNorm = { 0.0f, 0.0f };
+	}
+	vout.position = position;
+	vout.positionScaled = Vector3(position) / position.w;
+}
+
+void Renderer::DrawTriangle(const soft::Triangle& triangle, const Container& material) {
+	MinMaxAABB(triangle, m_Max, m_Min);
+
+	Int2 pixelCoordMax{ vToi(Ceil(VectorRangeToPixelCoord(m_Max))) };
+	Int2 pixelCoordMin{ vToi(Floor(VectorRangeToPixelCoord(m_Min))) };
+
+	pixelCoordMax.x += 1;
+	pixelCoordMax.y += 1;
+
+	pixelCoordMin.x -= 1;
+	pixelCoordMin.y -= 1;
+
+	Int_AABB triangleBounds{ pixelCoordMin, {pixelCoordMax.x - pixelCoordMin.x, -(pixelCoordMax.y - pixelCoordMin.y) + m_Height} };
+
+	if (!isIntersect(triangleBounds, m_ScreenBounds)) { // Instead of culling by triangle points instead cull by 2d bounding box
+		return;
+	}
+
+	const Vector2 v0 = triangle.v0.xyNorm;
+	const Vector2 v1 = triangle.v1.xyNorm;
+	const Vector2 v2 = triangle.v2.xyNorm;
+
+	const Vector2 c0 = VectorRangeToPixelCoord(v0);
+	const Vector2 c1 = VectorRangeToPixelCoord(v1);
+	const Vector2 c2 = VectorRangeToPixelCoord(v2);
+
+	const Vector2 r_min = v_Clamp(v_min(c0, c1, c2), { 0, 0 }, { static_cast<float>(m_Width), static_cast<float>(m_Height) });
+	const Vector2 r_max = v_Clamp(v_max(c0, c1, c2), { 0, 0 }, { static_cast<float>(m_Width), static_cast<float>(m_Height) });
+
+	const Vector3 invZ = { 1.0f / triangle.v0.position.w, 1.0f / triangle.v1.position.w, 1.0f / triangle.v2.position.w };
+
+	soft::VS_OUT varryings{ material };
+
+	for (int x = int(r_min.x); x < int(r_max.x); ++x) {
+		for (int y = int(r_min.y); y < int(r_max.y); ++y) {
+			const int pixelIndex = x + y * m_Width;
+			ColorRGB finalColor{ colors::White };
+
+			const Vector2 pixel{ center(x, y) };
+
+			bool isBackFace{ 0 };
+
+			if (!isPixelInTriangle(c0, c1, c2, pixel, material.isFlame, isBackFace))
+				continue;
+
+			Vector3 barCoord = isBackFace ? GetBarycentricCoord(c0, c1, c2, pixel) : GetBarycentricCoord(c0, c1, c2, pixel);
+
+			const float invInterpolatedW = 1.0f / ((invZ.x) * barCoord.x + (invZ.y) * barCoord.y + (invZ.z) * barCoord.z);
+
+			const float interpolatedZ = (triangle.v0.positionScaled.z * invZ.x * barCoord.x + triangle.v1.positionScaled.z * invZ.y * barCoord.y + triangle.v2.positionScaled.z * invZ.z * barCoord.z) * invInterpolatedW;
+
+			if (m_pScene->renderSettings.useDepth) {
+				if (m_pDepthBufferPixels[pixelIndex] < interpolatedZ) {
+					continue;
+				}
+			}
+
+
+			// Interpolated values
+			Vector2 texCoord{ (triangle.v0.uv * invZ.x * barCoord.x + triangle.v1.uv * invZ.y * barCoord.y + triangle.v2.uv * invZ.z * barCoord.z) * invInterpolatedW };
+			Vector3 normal{ (triangle.v0.normal * invZ.x * barCoord.x + triangle.v1.normal * invZ.y * barCoord.y + triangle.v2.normal * invZ.z * barCoord.z) * invInterpolatedW };
+			Vector3 tangent{ (triangle.v0.tangent * invZ.x * barCoord.x + triangle.v1.tangent * invZ.y * barCoord.y + triangle.v2.tangent * invZ.z * barCoord.z) * invInterpolatedW };
+			Vector3 viewDirection{ (triangle.v0.viewDirection * invZ.x * barCoord.x + triangle.v1.viewDirection * invZ.y * barCoord.y + triangle.v2.viewDirection * invZ.z * barCoord.z) * invInterpolatedW };
+			// End
+
+			varryings.vTexCoord = texCoord;
+			varryings.vNormal = normal;
+			varryings.vTangent = tangent;
+			varryings.vViewDirection = viewDirection;
+
+			static const int blueMask = 0xFF0000, greenMask = 0xFF00, redMask = 0xFF;
+
+			uint32_t value = m_pBackBufferPixels[pixelIndex];
+
+			ColorRGB existingPixel{ float((value & redMask)) / 255.f, float((value & greenMask) >> 8) / 255.f, float((value & blueMask) >> 16) / 255.f };
+
+			float alpha{ 1.0f };
+			bool pass = PixelShading(finalColor, varryings, alpha, material.isFlame);
+
+			if (!pass && !m_pScene->renderSettings.visualizeDepth)
+				continue;
+
+			finalColor.MaxToOne();
+			finalColor = ColorRGB::Lerp(existingPixel, finalColor, 1.0f - powf(1.0f - alpha, 2.0f)); // finalColor + existingPixel * (1.0f - alpha); //
+
+
+			// Bumping up the luminosity using the sine curve to lift the lower values
+			// finalColor.r = sinf(finalColor.r * M_PI / 2.0f);
+			// finalColor.g = sinf(finalColor.g * M_PI / 2.0f);
+			// finalColor.b = sinf(finalColor.b * M_PI / 2.0f);
+
+			if (alpha == 1.0f)
+				m_pDepthBufferPixels[pixelIndex] = interpolatedZ;
+
+			if (m_pScene->renderSettings.visualizeDepth) {
+				finalColor = { interpolatedZ, interpolatedZ, interpolatedZ };
+			}
+
+			m_pBackBufferPixels[pixelIndex] = SDL_MapRGB(m_pBackBuffer->format,
+				static_cast<uint8_t>(finalColor.r * 255),
+				static_cast<uint8_t>(finalColor.g * 255),
+				static_cast<uint8_t>(finalColor.b * 255));
+		}
+	}
+}
+
+bool Renderer::PixelShading(ColorRGB& fragColor, const soft::VS_OUT& in, float& alpha, bool isFlame) const {
+	const soft::RenderSettings& rs{ m_pScene->renderSettings };
+
+	alpha = 1.0f;
+	if (in.container.diffuseMap != nullptr) {
+		alpha = in.container.diffuseMap->SampleRGBA(in.vTexCoord.x, in.vTexCoord.y).a;
+		if (alpha < 0.05f)
+			return false;
+	}
+
+	ColorRGB pixelColor{ colors::White };
+	const Matrix tangentSpaceAxis = GetTangentSpaceAxis(in.vTangent, in.vNormal);
+
+	Vector3 transformedNormal = m_pScene->renderSettings.useNormalMap ? tangentSpaceAxis.TransformVector(in.container.normalMap->SampleNormal(in.vTexCoord)) : in.vNormal;
+
+	const float observable_area = GetObservableArea(transformedNormal);
+
+	if (in.container.diffuseMap != nullptr && rs.shadingMode == soft::RenderSettings::Combined || rs.shadingMode == soft::RenderSettings::Diffuse)
+		pixelColor = GetLambertColor(in.container.diffuseMap->Sample(in.vTexCoord), 7.0f);
+
+	if ((rs.shadingMode == soft::RenderSettings::Combined || rs.shadingMode == soft::RenderSettings::Specular) && !isFlame) {
+		const float hcSpecularMultiplier = 1.0f;
+		const float hcGlossMultiplier = 25.0f;
+
+		const float specularFactor{ in.container.specularMap->Sample(in.vTexCoord).r }; // Jusk keeping r because specular is black and white
+		const float glossFactor{ in.container.glossMap->Sample(in.vTexCoord).r }; // And same here
+
+		const float phongValue{ Phong(-m_LightDirection, transformedNormal, in.vViewDirection, specularFactor * hcSpecularMultiplier, glossFactor * hcGlossMultiplier) };
+
+		pixelColor += ColorRGB{ phongValue, phongValue, phongValue };
+	}
+
+	if ((rs.shadingMode == soft::RenderSettings::Combined || rs.shadingMode == soft::RenderSettings::ObservedArea) && !isFlame)
+		pixelColor *= observable_area;
+
+	//pixelColor.MaxToOne();
+	fragColor = pixelColor;
+	return true;
+}
+
+bool Renderer::isPixelInTriangle(const Vector2& c0, const Vector2& c1, const Vector2& c2, const Vector2& pixel, bool isFlame, bool& isBackFace) {
+	bool z0 = Vector2::Cross(pixel - c0, c1 - c0) < 0;
+	bool z1 = Vector2::Cross(pixel - c1, c2 - c1) < 0;
+	bool z2 = Vector2::Cross(pixel - c2, c0 - c2) < 0;
+
+	isBackFace = (!z0 && !z1 && !z2);
+	bool isFrontFace = (z0 && z1 && z2);
+
+	bool none = isBackFace || isFrontFace;
+
+	if (isFlame)
+		return isFrontFace;
+
+	switch (m_pScene->renderSettings.cullMode) {
+		case soft::RenderSettings::Back:
+			return isFrontFace;
+		case soft::RenderSettings::Front:
+			return isBackFace;
+		case soft::RenderSettings::None:
+			return none;
+	}
+}
+
+Vector2 Renderer::NormlPixelToScreen(const Vector2& normlPixel) const {
+	return { normlPixel.x / float(m_Width), normlPixel.y / float(m_Height) };
+}
+
+Vector2 Renderer::center(int x, int y) {
+	return { float(x) + 0.5f, float(y) + 0.5f };
+}
+
+void Renderer::ClearBuffers() const {
+	ColorRGB finalColor{ m_pScene->renderSettings.useUniformClearColor ? ColorRGB{ clearColor[0], clearColor[1], clearColor[2] } : clearColorSoftware};
+	for (int px{}; px < m_Width; ++px)
+	{
+		for (int py{}; py < m_Height; ++py)
+		{
+			m_pBackBufferPixels[px + (py * m_Width)] = SDL_MapRGB(m_pBackBuffer->format,
+				static_cast<uint8_t>(finalColor.r * 255),
+				static_cast<uint8_t>(finalColor.g * 255),
+				static_cast<uint8_t>(finalColor.b * 255));
+			m_pDepthBufferPixels[px + (py * m_Width)] = 1.0f;
+		}
+	}
+}
+
+Vector3 Renderer::GetBarycentricCoord(const Vector2& c0, const Vector2& c1, const Vector2& c2, const Vector2& pixel) {
+	const float totalArea = fabsf(Vector2::Cross(c1 - c0, c2 - c0));
+
+	const float invArea = 1.0f / totalArea;
+
+	const float e0 = Vector2::Cross(c1 - c0, pixel - c0);
+	const float e1 = Vector2::Cross(c2 - c1, pixel - c1);
+	const float e2 = Vector2::Cross(c0 - c2, pixel - c2);
+
+	return Vector3{ e1, e2, e0 } * invArea;
+}
+
+Vector2 Renderer::v_max(const Vector2& v1, const Vector2& v2, const Vector2& v3) {
+	return { fmaxf(fmaxf(v1.x, v2.x), v3.x), fmaxf(fmaxf(v1.y, v2.y), v3.y) };
+}
+
+Vector2 Renderer::v_min(const Vector2& v1, const Vector2& v2, const Vector2& v3) {
+	return { fminf(fminf(v1.x, v2.x), v3.x), fminf(fminf(v1.y, v2.y), v3.y) };
+}
+
+Vector2 Renderer::v_Clamp(const Vector2& v, const Vector2& min, const Vector2& max) {
+	return { Clamp(v.x, min.x, max.x), Clamp(v.y, min.y, max.y) };
+}
+
+bool Renderer::isClose(const Vector2& v0, const Vector2& p, float distance) {
+	const float dx = fabsf(v0.x - p.x);
+	const float dy = fabsf(v0.y - p.y);
+
+	return 0.5f * (dx + dy + fmaxf(dx, dy)) < distance;
+}
+
+void Renderer::MinMaxAABB(const soft::Triangle& screenSpace, Vector2& max, Vector2& min) {
+	max.x = fmaxf(screenSpace.v0.xyNorm.x, fmaxf(screenSpace.v1.xyNorm.x, screenSpace.v2.xyNorm.x));
+	max.y = fmaxf(screenSpace.v0.xyNorm.y, fmaxf(screenSpace.v1.xyNorm.y, screenSpace.v2.xyNorm.y));
+
+	min.x = fminf(screenSpace.v0.xyNorm.x, fminf(screenSpace.v1.xyNorm.x, screenSpace.v2.xyNorm.x));
+	min.y = fminf(screenSpace.v0.xyNorm.y, fminf(screenSpace.v1.xyNorm.y, screenSpace.v2.xyNorm.y));
+}
+
+Vector2 Renderer::VectorRangeToPixelCoord(const Vector2& v) const {
+	Vector2 result = { ((v.x * 0.5f) + 0.5f) * m_Width, ((v.y * 0.5f) + 0.5f) * m_Height };
+
+	return result;
+}
+
+Vector2 Renderer::Ceil(const Vector2& v) {
+	return { ceilf(v.x), ceilf(v.y) };
+}
+
+Vector2 Renderer::Floor(const Vector2& v) {
+	return { floorf(v.x), floorf(v.y) };
+}
+
+Vector2 Renderer::PixelCoordToScreenCoord(const Vector2& v) const {
+	float x = v.x / m_Width * 2.f - 1.f;
+	float y = v.y / m_Height * 2.f - 1.f;
+
+	return { x, y };
+}
+
+float Renderer::GetObservableArea(const Vector3& normal) const {
+	return fmaxf(Vector3::Dot(normal, -m_LightDirection), 0.0f);
+}
+
+ColorRGB Renderer::GetLambertColor(const ColorRGB& cd, float kd) {
+	return cd * kd / float(M_PI);
+}
+
+Matrix Renderer::GetTangentSpaceAxis(const Vector3& tangent, const Vector3& normal) {
+	Vector3 binormal = Vector3::Cross(normal, tangent);
+	return Matrix{ tangent, binormal, normal, {0, 0, 0} };
+}
+
+float Renderer::Phong(const Vector3& l, const Vector3& n, const Vector3& v, float ks, float e) {
+	const Vector3 r{ l - (n * 2.0f * Vector3::Dot(l,n)) };
+	const float cos_a{ fmaxf(Vector3::Dot(r,v), 0.0f) };
+
+	return ks * powf(cos_a, e);
+}
+
+Int2 Renderer::vToi(const Vector2& v) {
+	return { int(v.x), int(v.y) };
+}
+
+#pragma endregion

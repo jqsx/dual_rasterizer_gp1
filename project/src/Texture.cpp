@@ -68,11 +68,64 @@ Texture::Texture(ID3D11Device* pDevice, const std::string& path)
 		std::cerr << "Failed to initialize D3D11 texture shader resource viewer." << std::endl;
 		return;
 	}
+
+	m_pSurfacePixels = (uint32_t*)m_pSurface->pixels;
 }
 
 Texture::~Texture()
-{	if (m_pSurface)
+{	
+	if (m_pSurface)
+	{
 		SDL_FreeSurface(m_pSurface);
+		m_pSurfacePixels = nullptr;
+		m_pSurface = nullptr;
+	}
 	_RELEASE_DX11_PTR(m_pResourceViewer)
 	_RELEASE_DX11_PTR(m_pResource)
+}
+
+ColorRGB Texture::Sample(const Vector2& uv) const
+{
+	//TODO
+	//Sample the correct texel for the given uv
+
+	const int px = Clamp(static_cast<int>(uv.x * float(m_pSurface->w)), 0, m_pSurface->w - 1);
+	const int py = Clamp(static_cast<int>(uv.y * float(m_pSurface->h)), 0, m_pSurface->h - 1);
+
+	return SamplePixel(px, py);
+}
+
+ColorRGB Texture::SampleLinear(const Vector2& uv) const {
+	const int px_l = Clamp(static_cast<int>(uv.x * float(m_pSurface->w)), 0, m_pSurface->w - 1);
+	const int py_l = Clamp(static_cast<int>(uv.y * float(m_pSurface->h)), 0, m_pSurface->h - 1);
+
+	const int px_h = Clamp(static_cast<int>(ceilf(uv.x * float(m_pSurface->w))), 0, m_pSurface->w - 1);
+	const int py_h = Clamp(static_cast<int>(ceilf(uv.y * float(m_pSurface->h))), 0, m_pSurface->h - 1);
+
+	return ColorRGB::Lerp(SamplePixel(px_l, py_l), SamplePixel(px_h, py_h), 0.5f);
+}
+
+ColorRGB Texture::SamplePixel(int px, int py) const {
+	const int blueMask = 0xFF0000, greenMask = 0xFF00, redMask = 0xFF;
+
+	uint32_t rgb = m_pSurfacePixels[px + py * m_pSurface->w];
+
+	return { float((rgb & redMask)) / 255.f, float((rgb & greenMask) >> 8) / 255.f, float((rgb & blueMask) >> 16) / 255.f };
+}
+
+ColorRGBA dae::Texture::SampleRGBA(float x, float y) const
+{
+	const int px = Clamp(static_cast<int>(x * float(m_pSurface->w)), 0, m_pSurface->w - 1);
+	const int py = Clamp(static_cast<int>(y * float(m_pSurface->h)), 0, m_pSurface->h - 1);
+
+	const int blueMask = 0xFF0000, greenMask = 0xFF00, redMask = 0xFF, alphaMask = 0xFF000000;
+
+	uint32_t rgb = m_pSurfacePixels[px + py * m_pSurface->w];
+
+	return { float((rgb & redMask)) / 255.f, float((rgb & greenMask) >> 8) / 255.f, float((rgb & blueMask) >> 16) / 255.f, float((rgb & alphaMask) >> 24) / 255.0f};
+}
+
+Vector3 Texture::SampleNormal(const Vector2& uv) const {
+	ColorRGB color = Sample(uv);
+	return { color.r * 2.0f - 1.0f, color.g * 2.0f - 1.0f, (color.b - 0.5f) * 2.0f };
 }

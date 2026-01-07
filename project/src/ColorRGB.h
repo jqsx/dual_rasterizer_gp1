@@ -16,6 +16,10 @@ namespace dae
 				*this /= maxValue;
 		}
 
+		static float Lerpf(float a, float b, float t) {
+			return a + (b - a) * fmaxf(fminf(t, 1.0f), 0.0f);
+		}
+
 		static ColorRGB Lerp(const ColorRGB& c1, const ColorRGB& c2, float factor)
 		{
 			return { Lerpf(c1.r, c2.r, factor), Lerpf(c1.g, c2.g, factor), Lerpf(c1.b, c2.b, factor) };

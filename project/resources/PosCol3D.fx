@@ -18,11 +18,7 @@ struct VS_OUTPUT
     float3 Tangent : TANGENT;
 };
 
-RasterizerState gRasterizerState
-{
-    CullMode = back;
-    FrontCounterClockwise = false;
-};
+RasterizerState gRasterizerState : CullMode;
 
 DepthStencilState gDepthStencilState
 {
@@ -59,7 +55,7 @@ SamplerState gSamplerState : TextureSampleState;
 
 float GetObservableArea(float3 worldNormal)
 {
-    return max(dot(worldNormal, gLightDirection), 0.0f);
+    return max(dot(worldNormal, -gLightDirection), 0.0f);
 }
 
 float3 SampleNormal(float2 coord)
@@ -87,7 +83,7 @@ float Phong(float3 l, float3 n, float3 v, float ks, float e)
 
 float3 Lambert(float3 diffuse, float ks)
 {
-    return diffuse * ks;
+    return diffuse * ks / 3.141592653f;
 }
 
 float3x3 GetTangentMatrix(float3 tangent, float3 normal)
@@ -132,7 +128,7 @@ float4 PS(VS_OUTPUT input) : SV_TARGET
     
     float4 diffuse = gDiffuseMap.Sample(gSamplerState, input.TexCoord);
     
-    return float4(MaxToOne(Lambert(diffuse.rgb, 7.0f) * observable_area + Phong(gLightDirection, transformedNormal, input.ViewDirection, specular * 1.0f, gloss * 25.f)),
+    return float4(MaxToOne(Lambert(diffuse.rgb, 7.0f) * observable_area + Phong(-gLightDirection, transformedNormal, input.ViewDirection, specular * 1.0f, gloss * 25.f)),
     diffuse.a);
 }
 

@@ -42,16 +42,18 @@ namespace dae
 			origin = _origin;
 		}
 
-		void CalculateViewMatrix()
+		void CalculateViewMatrix(bool useSoftwareRasterizer)
 		{
 			//forward = {0, 0, 1};
 			//pitchYawToVec(-totalYaw, -totalPitch, forward.x, forward.y, forward.z);
 			//Matrix rotation{ Matrix::CreateLookAtLH({0, 0, 0}, forward, {0, 1, 0}) };
-			Matrix rotation = Matrix::CreateRotation(-totalPitch, totalYaw, 0.0f);
+			Matrix rotation = Matrix::CreateRotation((useSoftwareRasterizer ? 1.0f : -1.0f) * totalPitch, totalYaw, 0.0f);
 			forward = rotation.TransformVector({ 0, 0, 1 });
 			right = Vector3::Cross(forward, { 0, 1, 0 }).Normalized();
 
 			Vector3 flipY = origin;
+			if (useSoftwareRasterizer)
+				flipY.y *= -1.0f;
 
 			viewMatrix = (rotation * Matrix::CreateTranslation(flipY)).Inverse(); //*Matrix::CreateScale(1.0f, -1.0f, 1.0f);
 		}
@@ -69,12 +71,14 @@ namespace dae
 			z = sinf(pitch + hpi) * cosf(yaw);
 		}
 
-		void Update(const Timer* pTimer, bool isLeftMouseButtonDown, bool isRightMouseButtonDown)
+		void Update(const Timer* pTimer, bool isLeftMouseButtonDown, bool isRightMouseButtonDown, bool useSoftwareRasterizer)
 		{
 			const float deltaTime = pTimer->GetElapsed();
 
 			// Keyboard Input
 			const uint8_t* pKeyboardState = SDL_GetKeyboardState(nullptr);
+
+			const float BOOST{ pKeyboardState[SDL_SCANCODE_LSHIFT] ? 2.0f : 1.0f };
 
 			 //Mouse Input
 			int mouseX{}, mouseY{};
@@ -86,7 +90,7 @@ namespace dae
 				const float input_Y = float(mouseY);
 
 				// Move (world) Up/Down (LMB + RMB + Mouse Move Y)
-				origin += (up * input_Y) * pTimer->GetElapsed() * 50.0f;
+				origin += (up * input_Y) * pTimer->GetElapsed() * 50.0f * BOOST;
 			}
 			else if (isLeftMouseButtonDown) {
 				const float input_Y = float(mouseY);
@@ -95,7 +99,7 @@ namespace dae
 				totalYaw += float(mouseX) * sensitivity;
 
 				// Move (local) Forward/Backward (LMB + Mouse Move Y)
-				origin += (forward * -input_Y) * pTimer->GetElapsed() * 50.0f;
+				origin += (forward * -input_Y) * pTimer->GetElapsed() * 50.0f * BOOST;
 			}
 			else if (isRightMouseButtonDown) {
 				// Rotate Yaw (RMB + Mouse Move X)
@@ -121,10 +125,10 @@ namespace dae
 				const float HORIZONTAL{(pKeyboardState[SDL_SCANCODE_D] || pKeyboardState[SDL_SCANCODE_RIGHT] ? 1.0f : 0.0f) + (pKeyboardState[SDL_SCANCODE_A] || pKeyboardState[SDL_SCANCODE_LEFT] ? -1.0f : 0.0f)};
 				const float UP_DOWN{(pKeyboardState[SDL_SCANCODE_SPACE] ? 1.0f : 0.0f) + (pKeyboardState[SDL_SCANCODE_C] ? -1.0f : 0.0f)};
 
-				origin += (forward * VERTICAL + up * UP_DOWN + right * HORIZONTAL) * pTimer->GetElapsed() * 50.0f;
+				origin += (forward * VERTICAL + up * UP_DOWN + right * HORIZONTAL) * pTimer->GetElapsed() * 50.0f * BOOST;
 			}
 
-			CalculateViewMatrix();
+			CalculateViewMatrix(useSoftwareRasterizer);
 			CalculateProjectionMatrix();
 		}
 	};
