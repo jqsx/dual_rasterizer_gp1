@@ -91,13 +91,14 @@ namespace dae
 	};
 
 	struct Container {
-		Mesh* mesh;
-		Effect* effect;
-		Texture* diffuseMap;
-		Texture* specularMap;
-		Texture* normalMap;
-		Texture* glossMap;
+		Mesh* mesh{};
+		Effect* effect{};
+		Texture* diffuseMap{};
+		Texture* specularMap{};
+		Texture* normalMap{};
+		Texture* glossMap{};
 		soft::PrimitiveTopology topology{ soft::PrimitiveTopology::TriangleList };
+		float rotation{};
 		Matrix world{ Matrix::CreateIdentity() };
 		bool isFlame{ 0 };
 	};

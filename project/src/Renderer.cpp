@@ -39,7 +39,7 @@ Renderer::Renderer(SDL_Window* pWindow) :
 		InitializeSamplerStates();
 
 		m_pScene = new Scene();
-		m_Camera.Initialize(45.f, { 0.0f, 0.0f, -100.0f });
+		m_Camera.Initialize(45.f, { 0.0f, 0.0f, 0.0f });
 		m_pScene->InitializeScene(m_pDevice);
 		m_pScene->GenerateMips(m_pDeviceContext);
 	}
@@ -84,11 +84,15 @@ void Renderer::Update(const Timer* pTimer, bool leftClick, bool rightClick, bool
 	m_Camera.aspect = float(m_Width) / float(m_Height);
 	m_Camera.Update(pTimer, leftClick, rightClick, useSoftwareRasterizer);
 
+	const float P{ M_PI / 4.0f };
 	if (m_pScene->renderSettings.hasRotation)
 	{
-		const Matrix worldMatrix = Matrix::CreateRotation(0.0f, pTimer->GetTotal() * M_PI / 4.0f, 0.0f) * Matrix::CreateTranslation({ 0.0f, 0.0f, 50.0f });
 		for (Container& container : m_pScene->GetContainersM()) {
-			container.world = worldMatrix;
+			container.rotation += pTimer->GetElapsed() * P;
+
+			container.rotation = fmodf(container.rotation, M_PI * 2.0f);
+
+			container.world = Matrix::CreateRotation(0, container.rotation, 0.0f) * Matrix::CreateTranslation({ 0.0f, 0.0f, 50.0f });
 		}
 	}
 }
@@ -127,18 +131,6 @@ void Renderer::Render() const
 		m_pDeviceContext->IASetIndexBuffer(container.mesh->GetIndexBuffer(), DXGI_FORMAT_R32_UINT, 0);
 
 		Matrix projView = container.world * m_Camera.viewMatrix * m_Camera.projectionMatrix;
-
-		//std::cout << std::endl;
-
-		//for (size_t i = 0; i < 4; i++)
-		//{
-		//	std::cout << "[ ";
-		//	for (size_t j = 0; j < 4; j++)
-		//	{
-		//		std::cout << projView[i][j] << ", ";
-		//	}
-		//	std::cout << " ] " << std::endl;
-		//}
 
 		container.effect->SetWorldViewProj(projView);
 		container.effect->SetWorld(container.world);
@@ -925,6 +917,8 @@ void Renderer::DrawTriangle(const soft::Triangle& triangle, const Container& mat
 	const Vector3 invZ = { 1.0f / triangle.v0.position.w, 1.0f / triangle.v1.position.w, 1.0f / triangle.v2.position.w };
 
 	soft::VS_OUT varryings{ material };
+	
+	const float hex8ToFloat = 1.0f / 255.0f;
 
 	for (int x = int(r_min.x); x < int(r_max.x); ++x) {
 		for (int y = int(r_min.y); y < int(r_max.y); ++y) {
@@ -938,7 +932,7 @@ void Renderer::DrawTriangle(const soft::Triangle& triangle, const Container& mat
 			if (!isPixelInTriangle(c0, c1, c2, pixel, material.isFlame, isBackFace))
 				continue;
 
-			Vector3 barCoord = isBackFace ? GetBarycentricCoord(c0, c1, c2, pixel) : GetBarycentricCoord(c0, c1, c2, pixel);
+			const Vector3 barCoord = isBackFace ? GetBarycentricCoord(c0, c1, c2, pixel) : GetBarycentricCoord(c0, c1, c2, pixel);
 
 			const float invInterpolatedW = 1.0f / ((invZ.x) * barCoord.x + (invZ.y) * barCoord.y + (invZ.z) * barCoord.z);
 
@@ -950,45 +944,46 @@ void Renderer::DrawTriangle(const soft::Triangle& triangle, const Container& mat
 				}
 			}
 
-
-			// Interpolated values
-			Vector2 texCoord{ (triangle.v0.uv * invZ.x * barCoord.x + triangle.v1.uv * invZ.y * barCoord.y + triangle.v2.uv * invZ.z * barCoord.z) * invInterpolatedW };
-			Vector3 normal{ (triangle.v0.normal * invZ.x * barCoord.x + triangle.v1.normal * invZ.y * barCoord.y + triangle.v2.normal * invZ.z * barCoord.z) * invInterpolatedW };
-			Vector3 tangent{ (triangle.v0.tangent * invZ.x * barCoord.x + triangle.v1.tangent * invZ.y * barCoord.y + triangle.v2.tangent * invZ.z * barCoord.z) * invInterpolatedW };
-			Vector3 viewDirection{ (triangle.v0.viewDirection * invZ.x * barCoord.x + triangle.v1.viewDirection * invZ.y * barCoord.y + triangle.v2.viewDirection * invZ.z * barCoord.z) * invInterpolatedW };
-			// End
-
-			varryings.vTexCoord = texCoord;
-			varryings.vNormal = normal;
-			varryings.vTangent = tangent;
-			varryings.vViewDirection = viewDirection;
-
-			static const int blueMask = 0xFF0000, greenMask = 0xFF00, redMask = 0xFF;
-
-			uint32_t value = m_pBackBufferPixels[pixelIndex];
-
-			ColorRGB existingPixel{ float((value & redMask)) / 255.f, float((value & greenMask) >> 8) / 255.f, float((value & blueMask) >> 16) / 255.f };
-
 			float alpha{ 1.0f };
-			bool pass = PixelShading(finalColor, varryings, alpha, material.isFlame);
 
-			if (!pass && !m_pScene->renderSettings.visualizeDepth)
-				continue;
+			if (!m_pScene->renderSettings.visualizeDepth) {
+				// Interpolated values
+				const Vector2 texCoord{ (triangle.v0.uv * invZ.x * barCoord.x + triangle.v1.uv * invZ.y * barCoord.y + triangle.v2.uv * invZ.z * barCoord.z) * invInterpolatedW };
+				const Vector3 normal{ (triangle.v0.normal * invZ.x * barCoord.x + triangle.v1.normal * invZ.y * barCoord.y + triangle.v2.normal * invZ.z * barCoord.z) * invInterpolatedW };
+				const Vector3 tangent{ (triangle.v0.tangent * invZ.x * barCoord.x + triangle.v1.tangent * invZ.y * barCoord.y + triangle.v2.tangent * invZ.z * barCoord.z) * invInterpolatedW };
+				const Vector3 viewDirection{ (triangle.v0.viewDirection * invZ.x * barCoord.x + triangle.v1.viewDirection * invZ.y * barCoord.y + triangle.v2.viewDirection * invZ.z * barCoord.z) * invInterpolatedW };
+				// End
 
-			finalColor.MaxToOne();
-			finalColor = ColorRGB::Lerp(existingPixel, finalColor, 1.0f - powf(1.0f - alpha, 2.0f)); // finalColor + existingPixel * (1.0f - alpha); //
+				varryings.vTexCoord = texCoord;
+				varryings.vNormal = normal;
+				varryings.vTangent = tangent;
+				varryings.vViewDirection = viewDirection;
+
+				static const int blueMask = 0xFF0000, greenMask = 0xFF00, redMask = 0xFF;
+
+				const uint32_t value = m_pBackBufferPixels[pixelIndex];
+
+				const ColorRGB existingPixel{ float((value & redMask)) * hex8ToFloat, float((value & greenMask) >> 8) * hex8ToFloat, float((value & blueMask) >> 16) * hex8ToFloat };
+				
+				const bool pass = PixelShading(finalColor, varryings, alpha, material.isFlame);
+
+				if (!pass && !m_pScene->renderSettings.visualizeDepth)
+					continue;
+
+				finalColor.MaxToOne();
+				finalColor = ColorRGB::Lerp(existingPixel, finalColor, 1.0f - powf(1.0f - alpha, 2.0f)); // finalColor + existingPixel * (1.0f - alpha); //
+			}
 
 
 			// Bumping up the luminosity using the sine curve to lift the lower values
-			// finalColor.r = sinf(finalColor.r * M_PI / 2.0f);
-			// finalColor.g = sinf(finalColor.g * M_PI / 2.0f);
-			// finalColor.b = sinf(finalColor.b * M_PI / 2.0f);
 
-			if (alpha == 1.0f)
+			if (alpha == 1.0f) // alternative to sorting triangles just let all of them render anyway
 				m_pDepthBufferPixels[pixelIndex] = interpolatedZ;
 
 			if (m_pScene->renderSettings.visualizeDepth) {
-				finalColor = { interpolatedZ, interpolatedZ, interpolatedZ };
+				const float value = 1.0f - ((1.0f - interpolatedZ) * m_Camera.zFar * 2.0f - m_Camera.zNear);
+				finalColor = { value, value, value };
+				finalColor.MaxToOne();
 			}
 
 			m_pBackBufferPixels[pixelIndex] = SDL_MapRGB(m_pBackBuffer->format,
@@ -997,6 +992,7 @@ void Renderer::DrawTriangle(const soft::Triangle& triangle, const Container& mat
 				static_cast<uint8_t>(finalColor.b * 255));
 		}
 	}
+
 }
 
 bool Renderer::PixelShading(ColorRGB& fragColor, const soft::VS_OUT& in, float& alpha, bool isFlame) const {
@@ -1012,11 +1008,11 @@ bool Renderer::PixelShading(ColorRGB& fragColor, const soft::VS_OUT& in, float& 
 	ColorRGB pixelColor{ colors::White };
 	const Matrix tangentSpaceAxis = GetTangentSpaceAxis(in.vTangent, in.vNormal);
 
-	Vector3 transformedNormal = m_pScene->renderSettings.useNormalMap ? tangentSpaceAxis.TransformVector(in.container.normalMap->SampleNormal(in.vTexCoord)) : in.vNormal;
+	const Vector3 transformedNormal = m_pScene->renderSettings.useNormalMap ? tangentSpaceAxis.TransformVector(in.container.normalMap->SampleNormal(in.vTexCoord)) : in.vNormal;
 
 	const float observable_area = GetObservableArea(transformedNormal);
 
-	if (in.container.diffuseMap != nullptr && rs.shadingMode == soft::RenderSettings::Combined || rs.shadingMode == soft::RenderSettings::Diffuse)
+	if (in.container.diffuseMap != nullptr && (rs.shadingMode == soft::RenderSettings::Combined || rs.shadingMode == soft::RenderSettings::Diffuse))
 		pixelColor = GetLambertColor(in.container.diffuseMap->Sample(in.vTexCoord), 7.0f);
 
 	if ((rs.shadingMode == soft::RenderSettings::Combined || rs.shadingMode == soft::RenderSettings::Specular) && !isFlame) {
@@ -1040,14 +1036,14 @@ bool Renderer::PixelShading(ColorRGB& fragColor, const soft::VS_OUT& in, float& 
 }
 
 bool Renderer::isPixelInTriangle(const Vector2& c0, const Vector2& c1, const Vector2& c2, const Vector2& pixel, bool isFlame, bool& isBackFace) {
-	bool z0 = Vector2::Cross(pixel - c0, c1 - c0) < 0;
-	bool z1 = Vector2::Cross(pixel - c1, c2 - c1) < 0;
-	bool z2 = Vector2::Cross(pixel - c2, c0 - c2) < 0;
+	const bool z0 = Vector2::Cross(pixel - c0, c1 - c0) <= 0;
+	const bool z1 = Vector2::Cross(pixel - c1, c2 - c1) <= 0;
+	const bool z2 = Vector2::Cross(pixel - c2, c0 - c2) <= 0;
 
 	isBackFace = (!z0 && !z1 && !z2);
-	bool isFrontFace = (z0 && z1 && z2);
+	const bool isFrontFace = (z0 && z1 && z2);
 
-	bool none = isBackFace || isFrontFace;
+	const bool none = isBackFace || isFrontFace;
 
 	if (isFlame)
 		return isFrontFace;
@@ -1058,6 +1054,8 @@ bool Renderer::isPixelInTriangle(const Vector2& c0, const Vector2& c1, const Vec
 		case soft::RenderSettings::Front:
 			return isBackFace;
 		case soft::RenderSettings::None:
+			return none;
+		default:
 			return none;
 	}
 }
@@ -1166,7 +1164,7 @@ float Renderer::Phong(const Vector3& l, const Vector3& n, const Vector3& v, floa
 }
 
 Int2 Renderer::vToi(const Vector2& v) {
-	return { int(v.x), int(v.y) };
+	return { int(roundf(v.x)), int(roundf(v.y)) };
 }
 
 #pragma endregion

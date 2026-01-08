@@ -1,6 +1,5 @@
 #include "Texture.h"
 #include <d3d11.h>
-#include <d3dx11effect.h>
 #include <SDL.h>
 
 #include <iostream>
@@ -9,7 +8,7 @@
 using namespace dae;
 
 
-Texture::Texture(ID3D11Device* pDevice, const std::string& path)
+Texture::Texture(ID3D11Device* pDevice, const std::string& path) : m_pResource{nullptr}, m_pResourceViewer{nullptr}, m_pSurfacePixels{nullptr}, m_pSurface{nullptr}
 {
 	SDL_Surface* pSurface = m_pSurface = IMG_Load(path.c_str());
 
